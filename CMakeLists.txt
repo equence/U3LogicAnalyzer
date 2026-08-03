@@ -19,7 +19,7 @@
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-cmake_minimum_required(VERSION 2.8.12...3.31.5)
+cmake_minimum_required(VERSION 3.5)
 
 project(pulseview C CXX)
 
@@ -48,12 +48,12 @@ option(ENABLE_DECODE "Build with libsigrokdecode" TRUE)
 option(ENABLE_FLOW "Build with libsigrokflow" FALSE)
 option(ENABLE_TESTS "Enable unit tests" FALSE)
 option(STATIC_PKGDEPS_LIBS "Statically link to (pkg-config) libraries" FALSE)
-option(ENABLE_TS_UPDATE "Update .ts source files (Qt l10n)" FALSE)
 
 if(WIN32)
 	# On Windows/MinGW we need to statically link to libraries.
 	# This option is user configurable, but enable it by default on win32.
-	set(STATIC_PKGDEPS_LIBS TRUE)
+	# DISABLED: Qt5-static injects -static which conflicts with dynamic GLib linking
+	# set(STATIC_PKGDEPS_LIBS TRUE)
 
 	# Windows does not support UNIX signals.
 	set(ENABLE_SIGNALS FALSE)
@@ -69,65 +69,14 @@ endif()
 #= Documentation
 #-------------------------------------------------------------------------------
 
-add_subdirectory(manual)
+# add_subdirectory(manual)  # Disabled: not needed for CH32H417 build
 
 #===============================================================================
 #= Dependencies
 #-------------------------------------------------------------------------------
 
-include(CheckCSourceCompiles)
-include(CheckCXXCompilerFlag)
-include(CheckCXXSourceCompiles)
-include(CMakePushCheckState)
-include(memaccess)
-
-find_package(PkgConfig)
-
-if(CMAKE_VERSION VERSION_EQUAL "3.8.0" OR CMAKE_VERSION VERSION_GREATER "3.8.0")
-	check_cxx_compiler_flag("-std=c++17" HAVE_STD_CXX_17)
-	check_cxx_compiler_flag("-std=c++14" HAVE_STD_CXX_14)
-	check_cxx_compiler_flag("-std=c++11" HAVE_STD_CXX_11)
-	if(HAVE_STD_CXX_17)
-		message(STATUS "Using C++17 for the application build")
-		set(CMAKE_CXX_STANDARD 17)
-		set(REQUIRED_STD_CXX_FLAGS "-std=c++17")
-	elseif(HAVE_STD_CXX_14)
-		message(STATUS "Using C++14 for the application build")
-		set(CMAKE_CXX_STANDARD 14)
-		set(REQUIRED_STD_CXX_FLAGS "-std=c++14")
-	elseif(HAVE_STD_CXX_11)
-		message(STATUS "Using C++11 for the application build")
-		set(CMAKE_CXX_STANDARD 11)
-		set(REQUIRED_STD_CXX_FLAGS "-std=c++11")
-	else()
-		message(FATAL_ERROR "Need modern C++, at least language standard 11")
-	endif()
-else()
-	check_cxx_compiler_flag("-std=c++14" HAVE_STD_CXX_14)
-	check_cxx_compiler_flag("-std=c++11" HAVE_STD_CXX_11)
-	if(HAVE_STD_CXX_14)
-		message(STATUS "Using C++14 for the application build")
-		set(CMAKE_CXX_STANDARD 14)
-		set(REQUIRED_STD_CXX_FLAGS "-std=c++14")
-	elseif(HAVE_STD_CXX_11)
-		message(STATUS "Using C++11 for the application build")
-		set(CMAKE_CXX_STANDARD 11)
-		set(REQUIRED_STD_CXX_FLAGS "-std=c++11")
-	else()
-		message(FATAL_ERROR "Need modern C++, at least language standard 11")
-	endif()
-endif()
-
 list(APPEND PKGDEPS glib-2.0>=2.28.0)
-
-# Try to find the prefered glibmm-2.4. If not found then add glibmm-2.68
-# to the dependency list.
-pkg_check_modules(GLIBMM_2_4 glibmm-2.4>=2.28.0)
-if(GLIBMM_2_4_FOUND)
-	list(APPEND PKGDEPS glibmm-2.4>=2.28.0)
-else()
-	list(APPEND PKGDEPS glibmm-2.68>=2.68.0)
-endif()
+list(APPEND PKGDEPS glibmm-2.4>=2.28.0)
 
 if(ENABLE_FLOW)
 	list(APPEND PKGDEPS gstreamermm-1.0>=1.8.0)
@@ -145,6 +94,7 @@ if(ANDROID)
 	list(APPEND PKGDEPS libsigrokandroidutils>=0.1.0)
 endif()
 
+find_package(PkgConfig)
 pkg_check_modules(LIBSRCXX ${LIBSR_CXX_BINDING})
 if(NOT LIBSRCXX_FOUND OR NOT LIBSRCXX_VERSION)
 	message(FATAL_ERROR "libsigrok C++ bindings missing, check libsigrok's 'configure' output (missing dependencies?)")
@@ -153,37 +103,29 @@ pkg_check_modules(PKGDEPS REQUIRED ${PKGDEPS})
 
 set(CMAKE_AUTOMOC TRUE)
 
-# Check for Qt5, and check for Qt6 if Qt5 is not found.
-set(QT_COMPONENTS Core Gui LinguistTools Widgets Svg)
-find_package(Qt5 5.3 QUIET COMPONENTS Core)
-if(Qt5_FOUND)
-	find_package(Qt5 5.3 COMPONENTS ${QT_COMPONENTS} REQUIRED)
-	message(STATUS "Qt version: ${Qt5_VERSION}")
-else()
-	find_package(Qt6 6.2 COMPONENTS ${QT_COMPONENTS} REQUIRED)
-	message(STATUS "Qt version: ${Qt6_VERSION}")
-endif()
+find_package(Qt5 5.3 COMPONENTS Core Gui LinguistTools Widgets Svg REQUIRED)
+
+message(STATUS "Qt version: ${Qt5_VERSION}")
 
 if(WIN32)
-	# MXE workaround: Use pkg-config to find Qt5 and Qt6 libs.
+	# MXE workaround: Use pkg-config to find Qt5 libs.
 	# https://github.com/mxe/mxe/issues/1642
 	# Not required (and doesn't work) on MSYS2.
 	if(NOT DEFINED ENV{MSYSTEM})
-		if(Qt5_FOUND)
-			pkg_check_modules(QT5ALL REQUIRED Qt5Widgets>=5.3 Qt5Gui>=5.3 Qt5Svg>=5.3)
-		else()
-			pkg_check_modules(QT6ALL REQUIRED Qt6Widgets>=6.2 Qt6Gui>=6.2 Qt6Svg>=6.2)
-		endif()
+		pkg_check_modules(QT5ALL REQUIRED Qt5Widgets>=5.3 Qt5Gui>=5.3 Qt5Svg>=5.3)
 	endif()
 endif()
 
-if(Qt5_FOUND)
-	set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::Svg)
-else()
-	set(QT_LIBRARIES Qt6::Gui Qt6::Widgets Qt6::Svg)
-endif()
+set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::Svg)
 
-set(BOOSTCOMPS filesystem serialization)
+if(WIN32)
+	# MSYS2/MinGW still ships a separate boost_system library
+	set(BOOSTCOMPS filesystem serialization system)
+else()
+	# boost.system is header-only since 1.69; Homebrew/Linux do not provide a
+	# boost_system CMake component
+	set(BOOSTCOMPS filesystem serialization)
+endif()
 if(ENABLE_TESTS)
 	list(APPEND BOOSTCOMPS unit_test_framework)
 endif()
@@ -217,44 +159,48 @@ find_package(Threads REQUIRED)
 
 # Helper for checking for atomics
 function(check_working_cxx_atomics varname additional_lib)
-	cmake_push_check_state()
-	set(CMAKE_REQUIRED_FLAGS "${REQUIRED_STD_CXX_FLAGS}")
-	set(CMAKE_REQUIRED_LIBRARIES "${additional_lib}")
-	set(CMAKE_REQUIRED_QUIET 1)
-	CHECK_CXX_SOURCE_COMPILES("
+  include(CheckCXXSourceCompiles)
+  include(CMakePushCheckState)
+  cmake_push_check_state()
+  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+  set(CMAKE_REQUIRED_LIBRARIES "${additional_lib}")
+  set(CMAKE_REQUIRED_QUIET 1)
+  CHECK_CXX_SOURCE_COMPILES("
 #include <atomic>
 std::atomic<int> x;
 int main() {
-	return std::atomic_fetch_add_explicit(&x, 1, std::memory_order_seq_cst);
+  return std::atomic_fetch_add_explicit(&x, 1, std::memory_order_seq_cst);
 }
 " ${varname})
-	cmake_pop_check_state()
+  cmake_pop_check_state()
 endfunction(check_working_cxx_atomics)
 
 # First check if atomics work without the library.
 # If not, check if the library exists, and atomics work with it.
 check_working_cxx_atomics(HAVE_CXX_ATOMICS_WITHOUT_LIB "")
 if(HAVE_CXX_ATOMICS_WITHOUT_LIB)
-	message(STATUS "Atomics provided by the C-library - yes")
+  message(STATUS "Atomics provided by the C-library - yes")
 else()
-	message(STATUS "Atomics provided by the C-library - no")
-	find_library(LIBATOMIC_LIBRARY NAMES atomic PATH_SUFFIXES lib)
-	if(LIBATOMIC_LIBRARY)
-		check_working_cxx_atomics(HAVE_CXX_ATOMICS_WITH_LIB "${LIBATOMIC_LIBRARY}")
-		if (HAVE_CXX_ATOMICS_WITH_LIB)
-			message(STATUS "Atomics provided by libatomic - yes")
-		else()
-			message(STATUS "Atomics provided by libatomic - no")
-			message(FATAL_ERROR "Compiler must support std::atomic!")
-		endif()
-	else()
-		message(FATAL_ERROR "Compiler appears to require libatomic, but cannot find it.")
-	endif()
+  message(STATUS "Atomics provided by the C-library - no")
+  find_library(LIBATOMIC_LIBRARY NAMES atomic PATH_SUFFIXES lib)
+  if(LIBATOMIC_LIBRARY)
+    check_working_cxx_atomics(HAVE_CXX_ATOMICS_WITH_LIB "${LIBATOMIC_LIBRARY}")
+    if (HAVE_CXX_ATOMICS_WITH_LIB)
+      message(STATUS "Atomics provided by libatomic - yes")
+    else()
+      message(STATUS "Atomics provided by libatomic - no")
+      message(FATAL_ERROR "Compiler must support std::atomic!")
+    endif()
+  else()
+    message(FATAL_ERROR "Compiler appears to require libatomic, but cannot find it.")
+  endif()
 endif()
 
 # Check availability of features which depend on library versions.
 # TODO Ideally use check_symbol_exists() instead, reduce boilerplate.
 if(ENABLE_DECODE)
+	include(CheckCSourceCompiles)
+	include(CMakePushCheckState)
 	cmake_push_check_state()
 	set(CMAKE_REQUIRED_INCLUDES "${PKGDEPS_INCLUDE_DIRS}")
 	set(CMAKE_REQUIRED_LIBRARIES "sigrokdecode")
@@ -277,6 +223,7 @@ endif()
 #= System Introspection
 #-------------------------------------------------------------------------------
 
+include(memaccess)
 memaccess_check_unaligned_le(HAVE_UNALIGNED_LITTLE_ENDIAN_ACCESS)
 
 #===============================================================================
@@ -286,11 +233,7 @@ memaccess_check_unaligned_le(HAVE_UNALIGNED_LITTLE_ENDIAN_ACCESS)
 set(PV_TITLE PulseView)
 set(PV_VERSION_STRING "0.5.0")
 
-if(GLIBMM_2_4_FOUND)
-	set(PV_GLIBMM_VERSION ${PKGDEPS_glibmm-2.4_VERSION})
-else()
-	set(PV_GLIBMM_VERSION ${PKGDEPS_glibmm-2.68_VERSION})
-endif()
+set(PV_GLIBMM_VERSION ${PKGDEPS_glibmm-2.4_VERSION})
 
 include(GetGitRevisionDescription)
 
@@ -356,6 +299,8 @@ set(pulseview_SOURCES
 	pv/devices/inputfile.cpp
 	pv/devices/sessionfile.cpp
 	pv/dialogs/connect.cpp
+	pv/dialogs/decoder_channel_dialog.cpp
+	pv/dialogs/iapdialog.cpp
 	pv/dialogs/inputoutputoptions.cpp
 	pv/dialogs/settings.cpp
 	pv/dialogs/storeprogress.cpp
@@ -425,6 +370,8 @@ set(pulseview_HEADERS
 	pv/data/mathsignal.hpp
 	pv/data/signalbase.hpp
 	pv/dialogs/connect.hpp
+	pv/dialogs/decoder_channel_dialog.hpp
+	pv/dialogs/iapdialog.hpp
 	pv/dialogs/inputoutputoptions.hpp
 	pv/dialogs/settings.hpp
 	pv/dialogs/storeprogress.hpp
@@ -527,11 +474,7 @@ if(ANDROID)
 	)
 endif()
 
-if(Qt5_FOUND)
-	qt5_add_resources(pulseview_RESOURCES_RCC ${pulseview_RESOURCES})
-else()
-	qt6_add_resources(pulseview_RESOURCES_RCC ${pulseview_RESOURCES})
-endif()
+qt5_add_resources(pulseview_RESOURCES_RCC ${pulseview_RESOURCES})
 
 #===============================================================================
 #= Translations
@@ -543,19 +486,10 @@ if (NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 	configure_file("translations.qrc" "translations.qrc" COPYONLY)
 endif ()
 
-if(Qt5_FOUND)
-	qt5_add_translation(QM_FILES ${TS_FILES})
-	qt5_add_resources(pulseview_RESOURCES_RCC ${CMAKE_BINARY_DIR}/translations.qrc)
-	if (ENABLE_TS_UPDATE)
-		qt5_create_translation(QM_FILES ${pulseview_SOURCES} ${TS_FILES})
-	endif ()
-else()
-	qt6_add_translation(QM_FILES ${TS_FILES})
-	qt6_add_resources(pulseview_RESOURCES_RCC ${CMAKE_BINARY_DIR}/translations.qrc)
-	if (ENABLE_TS_UPDATE)
-		qt6_create_translation(QM_FILES ${pulseview_SOURCES} ${TS_FILES})
-	endif ()
-endif()
+qt5_add_translation(QM_FILES ${TS_FILES})
+qt5_create_translation(QM_FILES ${pulseview_SOURCES} ${TS_FILES})
+
+qt5_add_resources(pulseview_RESOURCES_RCC ${CMAKE_BINARY_DIR}/translations.qrc)
 
 #===============================================================================
 #= Global Definitions
@@ -564,9 +498,10 @@ endif()
 add_definitions(-DQT_NO_KEYWORDS)
 add_definitions(-D__STDC_LIMIT_MACROS)
 add_definitions(-Wall -Wextra)
-add_definitions(${REQUIRED_STD_CXX_FLAGS})
-
+add_definitions(-std=c++14)
 add_definitions(-DBOOST_MATH_DISABLE_FLOAT128=1)
+add_definitions(-DGLIBMM_STATIC_COMPILATION -DGLIB_STATIC_COMPILATION)
+add_definitions(-D_HAS_STD_BYTE=0)
 if(WIN32)
 	add_definitions(-Wa,-mbig-obj -O3)
 endif()
@@ -604,10 +539,96 @@ include_directories(
 	${Boost_INCLUDE_DIRS}
 )
 
+# MSYS2 MinGW: hidapi has no pkg-config, add include path directly
+include_directories(D:/msys64/mingw64/include/hidapi)
+
 if(STATIC_PKGDEPS_LIBS)
 	include_directories(${PKGDEPS_STATIC_INCLUDE_DIRS})
 else()
 	include_directories(${PKGDEPS_INCLUDE_DIRS})
+endif()
+
+# Workaround for MSYS2: PKGDEPS_INCLUDE_DIRS may be empty even when pkg-config finds packages
+# Manually add glib-2.0 and glibmm-2.4 include paths
+if(WIN32 AND NOT PKGDEPS_INCLUDE_DIRS)
+	# Get include directories from pkg-config for each package separately to avoid failures
+	set(DEPS_INCLUDE_DIRS "")
+
+	# glib-2.0
+	execute_process(
+		COMMAND pkg-config --cflags-only-I glib-2.0
+		OUTPUT_VARIABLE GLIB_FLAGS
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE GLIB_RESULT
+		ERROR_QUIET
+	)
+	if(GLIB_RESULT EQUAL 0 AND GLIB_FLAGS)
+		string(REPLACE "-I" "" GLIB_DIRS "${GLIB_FLAGS}")
+		separate_arguments(GLIB_DIRS)
+		list(APPEND DEPS_INCLUDE_DIRS ${GLIB_DIRS})
+	endif()
+
+	# glibmm-2.4
+	execute_process(
+		COMMAND pkg-config --cflags-only-I glibmm-2.4
+		OUTPUT_VARIABLE GLIBMM_FLAGS
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE GLIBMM_RESULT
+		ERROR_QUIET
+	)
+	if(GLIBMM_RESULT EQUAL 0 AND GLIBMM_FLAGS)
+		string(REPLACE "-I" "" GLIBMM_DIRS "${GLIBMM_FLAGS}")
+		separate_arguments(GLIBMM_DIRS)
+		list(APPEND DEPS_INCLUDE_DIRS ${GLIBMM_DIRS})
+	endif()
+
+	# libsigrok
+	execute_process(
+		COMMAND pkg-config --cflags-only-I libsigrok
+		OUTPUT_VARIABLE LIBSIGROK_FLAGS
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE LIBSIGROK_RESULT
+		ERROR_QUIET
+	)
+	if(LIBSIGROK_RESULT EQUAL 0 AND LIBSIGROK_FLAGS)
+		string(REPLACE "-I" "" LIBSIGROK_DIRS "${LIBSIGROK_FLAGS}")
+		separate_arguments(LIBSIGROK_DIRS)
+		list(APPEND DEPS_INCLUDE_DIRS ${LIBSIGROK_DIRS})
+	endif()
+
+	# libusb-1.0
+	execute_process(
+		COMMAND pkg-config --cflags-only-I libusb-1.0
+		OUTPUT_VARIABLE LIBUSB_FLAGS
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE LIBUSB_RESULT
+		ERROR_QUIET
+	)
+	if(LIBUSB_RESULT EQUAL 0 AND LIBUSB_FLAGS)
+		string(REPLACE "-I" "" LIBUSB_DIRS "${LIBUSB_FLAGS}")
+		separate_arguments(LIBUSB_DIRS)
+		list(APPEND DEPS_INCLUDE_DIRS ${LIBUSB_DIRS})
+	endif()
+
+	# hidapi
+	execute_process(
+		COMMAND pkg-config --cflags-only-I hidapi-hidraw hidapi-libusb
+		OUTPUT_VARIABLE HIDAPI_FLAGS
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE HIDAPI_RESULT
+		ERROR_QUIET
+	)
+	if(HIDAPI_RESULT EQUAL 0 AND HIDAPI_FLAGS)
+		string(REPLACE "-I" "" HIDAPI_DIRS "${HIDAPI_FLAGS}")
+		separate_arguments(HIDAPI_DIRS)
+		list(APPEND DEPS_INCLUDE_DIRS ${HIDAPI_DIRS})
+	else()
+		# MSYS2 MinGW: hidapi has no pkg-config, add include path directly
+		list(APPEND DEPS_INCLUDE_DIRS /mingw64/include/hidapi)
+	endif()
+
+	include_directories(${DEPS_INCLUDE_DIRS})
+	message(STATUS "Manually added include dirs: ${DEPS_INCLUDE_DIRS}")
 endif()
 
 #===============================================================================
@@ -615,6 +636,9 @@ endif()
 #-------------------------------------------------------------------------------
 
 link_directories(${Boost_LIBRARY_DIRS})
+if(WIN32)
+	link_directories(/mingw64/lib)
+endif()
 
 set(PULSEVIEW_LINK_LIBS
 	${Boost_LIBRARIES}
@@ -628,7 +652,11 @@ if(STATIC_PKGDEPS_LIBS)
 	list(APPEND PULSEVIEW_LINK_LIBS ${PKGDEPS_STATIC_LDFLAGS})
 else()
 	link_directories(${PKGDEPS_LIBRARY_DIRS})
-	list(APPEND PULSEVIEW_LINK_LIBS ${PKGDEPS_LIBRARIES})
+	if(WIN32)
+		list(APPEND PULSEVIEW_LINK_LIBS "-Wl,-Bdynamic" ${PKGDEPS_LIBRARIES})
+	else()
+		list(APPEND PULSEVIEW_LINK_LIBS ${PKGDEPS_LIBRARIES})
+	endif()
 endif()
 
 if(WIN32)
@@ -637,17 +665,32 @@ if(WIN32)
 	# We also need QWindowsIntegrationPlugin, Qt5PlatformSupport (only for
 	# Qt < 5.8.0), and all Qt libs and their dependencies.
 	add_definitions(-DQT_STATICPLUGIN)
-	if(Qt5_FOUND)
-		list(APPEND PULSEVIEW_LINK_LIBS Qt5::QSvgPlugin)
-		list(APPEND PULSEVIEW_LINK_LIBS Qt5::QWindowsIntegrationPlugin)
-		if(Qt5Gui_VERSION VERSION_LESS 5.8.0)
-			list(APPEND PULSEVIEW_LINK_LIBS -lQt5PlatformSupport)
-		endif()
-		list(APPEND PULSEVIEW_LINK_LIBS ${QT5ALL_LDFLAGS})
+	list(APPEND PULSEVIEW_LINK_LIBS Qt5::QSvgPlugin)
+	list(APPEND PULSEVIEW_LINK_LIBS Qt5::QWindowsIntegrationPlugin)
+	if(Qt5Gui_VERSION VERSION_LESS 5.8.0)
+		list(APPEND PULSEVIEW_LINK_LIBS -lQt5PlatformSupport)
+	endif()
+	list(APPEND PULSEVIEW_LINK_LIBS ${QT5ALL_LDFLAGS})
+	# Add hidapi for IAP dialog
+	list(APPEND PULSEVIEW_LINK_LIBS -lhidapi -lsetupapi -lusb-1.0 -ldwmapi)
+endif()
+
+# IAP dialog uses hidapi; resolve it via pkg-config on non-Windows platforms
+if(NOT WIN32)
+	pkg_check_modules(HIDAPI hidapi)
+	if(HIDAPI_FOUND)
+		include_directories(${HIDAPI_INCLUDE_DIRS})
+		list(APPEND PULSEVIEW_LINK_LIBS ${HIDAPI_LIBRARIES})
 	else()
-		list(APPEND PULSEVIEW_LINK_LIBS Qt6::QSvgPlugin)
-		list(APPEND PULSEVIEW_LINK_LIBS Qt6::QWindowsIntegrationPlugin)
-		list(APPEND PULSEVIEW_LINK_LIBS ${QT6ALL_LDFLAGS})
+		message(FATAL_ERROR "hidapi not found (required by the IAP dialog); install it, e.g. 'brew install hidapi'")
+	endif()
+	# The CH569 hot-plug polling thread (mainbar.cpp) calls libusb directly
+	pkg_check_modules(LIBUSB libusb-1.0)
+	if(LIBUSB_FOUND)
+		include_directories(${LIBUSB_INCLUDE_DIRS})
+		list(APPEND PULSEVIEW_LINK_LIBS ${LIBUSB_LIBRARIES})
+	else()
+		message(FATAL_ERROR "libusb not found (required by hot-plug polling); install it, e.g. 'brew install libusb'")
 	endif()
 endif()
 
@@ -660,7 +703,7 @@ if(ANDROID)
 	list(APPEND PULSEVIEW_LINK_LIBS "-llog")
 endif()
 
-set(INPUT_FILES_LIST ${pulseview_SOURCES} ${pulseview_RESOURCES_RCC} ${QM_FILES})
+set(INPUT_FILES_LIST ${pulseview_SOURCES} ${pulseview_RESOURCES_RCC})
 if(ANDROID)
 	add_library(${PROJECT_NAME} SHARED ${INPUT_FILES_LIST})
 else()
@@ -668,6 +711,9 @@ else()
 endif()
 
 target_link_libraries(${PROJECT_NAME} ${PULSEVIEW_LINK_LIBS})
+
+# Rename output to LogicAnalyzer.exe
+set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME LogicAnalyzer)
 
 if(WIN32 AND NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 	# Pass -mwindows so that no "DOS box" opens when PulseView is started.
@@ -704,7 +750,7 @@ configure_file(contrib/pulseview_cross.nsi.in ${CMAKE_CURRENT_BINARY_DIR}/contri
 set(CPACK_PACKAGE_VERSION_MAJOR ${PV_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PV_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PV_VERSION_MICRO})
-set(CPACK_PACKAGE_DESCRIPTION_FILE ${CMAKE_CURRENT_SOURCE_DIR}/README)
+set(CPACK_PACKAGE_DESCRIPTION_FILE ${CMAKE_CURRENT_SOURCE_DIR}/README.md)
 set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/COPYING)
 set(CPACK_SOURCE_IGNORE_FILES ${CMAKE_CURRENT_BINARY_DIR} ".gitignore" ".git")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${PV_VERSION_STRING}")

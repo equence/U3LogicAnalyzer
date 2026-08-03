@@ -1,6 +1,7 @@
 *~
 *.swp
 .*.swo
+.DS_Store
 
 pulseview
 pulseview-test
