@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,11 +23,7 @@
 #include <cassert>
 
 #include <QApplication>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#include <QScreen>
-#else
 #include <QDesktopWidget>
-#endif
 #include <QLineEdit>
 #include <QScrollBar>
 #include <QStyle>
@@ -90,7 +88,6 @@ Popup::Position Popup::position() const
 void Popup::set_position(const QPoint point, Position pos)
 {
 	point_ = point, pos_ = pos;
-
 	setContentsMargins(
 		MarginWidth + ((pos == Right) ? ArrowLength : 0),
 		MarginWidth + ((pos == Bottom) ? ArrowLength : 0),
@@ -108,7 +105,7 @@ bool Popup::eventFilter(QObject *obj, QEvent *event)
 		keyEvent = static_cast<QKeyEvent*>(event);
 		if (keyEvent->key() == Qt::Key_Enter ||
 		    keyEvent->key() == Qt::Key_Return) {
-			close();
+			// close();
 			return true;
 		}
 	}
@@ -228,8 +225,8 @@ QRect Popup::bubble_rect() const
 
 QRegion Popup::bubble_region() const
 {
-	const QRect rect(bubble_rect());
-
+	QRect rect(bubble_rect());
+	rect = rect.adjusted(0, 0, 10, 0);
 	const unsigned int r = MarginWidth;
 	const unsigned int d = 2 * r;
 	return QRegion(rect.adjusted(r, 0, -r, 0)).united(
@@ -256,12 +253,8 @@ void Popup::reposition_widget()
 {
 	QPoint o;
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-	const QRect screen_rect = QApplication::screenAt(point_)->availableGeometry();
-#else
 	const QRect screen_rect = QApplication::desktop()->availableGeometry(
 		QApplication::desktop()->screenNumber(point_));
-#endif
 
 	if (pos_ == Right || pos_ == Left)
 		o.ry() = -height() / 2;
@@ -332,8 +325,8 @@ void Popup::mouseReleaseEvent(QMouseEvent *event)
 
 	// We need our own out-of-bounds click handler because QWidget counts
 	// the drop-shadow region as inside the widget
-	if (!bubble_rect().contains(event->pos()))
-		close();
+	// if (!bubble_rect().contains(event->pos()))
+	// 	close();
 }
 
 void Popup::showEvent(QShowEvent*)

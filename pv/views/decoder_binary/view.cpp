@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2019 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,17 +76,29 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	QVBoxLayout *root_layout = new QVBoxLayout(this);
 	root_layout->setContentsMargins(0, 0, 0, 0);
 
+	setMinimumWidth(10);
+	resize(50, 200);
+
 	// Create toolbar
 	QToolBar* toolbar = new QToolBar();
 	toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
+	toolbar->setMovable(false);
+	toolbar->setSizePolicy(QSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed));
+	toolbar->setMinimumWidth(10);
 	parent->addToolBar(toolbar);
 
 	// Populate toolbar
 	toolbar->addWidget(new QLabel(tr("Decoder:")));
+	decoder_selector_->setMinimumWidth(10);
+	decoder_selector_->setSizeAdjustPolicy(QComboBox::AdjustToContentsOnFirstShow);
 	toolbar->addWidget(decoder_selector_);
+	class_selector_->setMinimumWidth(10);
+	class_selector_->setSizeAdjustPolicy(QComboBox::AdjustToContentsOnFirstShow);
 	toolbar->addWidget(class_selector_);
 	toolbar->addSeparator();
 	toolbar->addWidget(new QLabel(tr("Show data as")));
+	format_selector_->setMinimumWidth(10);
+	format_selector_->setSizeAdjustPolicy(QComboBox::AdjustToContentsOnFirstShow);
 	toolbar->addWidget(format_selector_);
 	toolbar->addSeparator();
 	toolbar->addWidget(save_button_);
@@ -96,25 +110,18 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	root_layout->addWidget(stacked_widget_);
 	stacked_widget_->addWidget(hex_view_);
 	stacked_widget_->setCurrentIndex(0);
+	stacked_widget_->setMinimumWidth(10);
 
 	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
 		this, SLOT(on_selected_decoder_changed(int)));
 	connect(class_selector_, SIGNAL(currentIndexChanged(int)),
 		this, SLOT(on_selected_class_changed(int)));
 
-	// Configure widgets
-	decoder_selector_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-	class_selector_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-
 	// Configure actions
 	save_action_->setText(tr("&Save..."));
 	save_action_->setIcon(QIcon::fromTheme("document-save-as",
 		QIcon(":/icons/document-save-as.png")));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	save_action_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
-#else
 	save_action_->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_S));
-#endif
 	connect(save_action_, SIGNAL(triggered(bool)),
 		this, SLOT(on_actionSave_triggered()));
 
@@ -131,7 +138,8 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	save_button_->setDefaultAction(save_action_);
 	save_button_->setPopupMode(QToolButton::MenuButtonPopup);
 
-	parent->setSizePolicy(hex_view_->sizePolicy()); // TODO Must be updated when selected widget changes
+	parent->setMinimumWidth(10);
+	parent->setSizePolicy(QSizePolicy(QSizePolicy::Minimum, QSizePolicy::Expanding));
 
 	// Set up metadata event handler
 	session_.metadata_obj_manager()->add_observer(this);
@@ -149,9 +157,21 @@ ViewType View::get_type() const
 	return ViewTypeDecoderBinary;
 }
 
+QSize View::sizeHint() const
+{
+	return QSize(50, 200);
+}
+
 void View::reset_view_state()
 {
 	ViewBase::reset_view_state();
+
+	delayed_view_updater_.stop();
+
+	disconnect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+	disconnect(class_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_class_changed(int)));
 
 	decoder_selector_->clear();
 	class_selector_->clear();
@@ -159,14 +179,43 @@ void View::reset_view_state()
 	save_button_->setEnabled(false);
 
 	hex_view_->clear();
+
+	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+	connect(class_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_class_changed(int)));
 }
 
 void View::clear_decode_signals()
 {
+	for (const shared_ptr<DecodeSignal>& signal : decode_signals_) {
+		disconnect(signal.get(), SIGNAL(name_changed(const QString&)),
+			this, SLOT(on_signal_name_changed(const QString&)));
+		disconnect(signal.get(), SIGNAL(decoder_stacked(void*)),
+			this, SLOT(on_decoder_stacked(void*)));
+		disconnect(signal.get(), SIGNAL(decoder_removed(void*)),
+			this, SLOT(on_decoder_removed(void*)));
+
+		if (signal.get() == signal_) {
+			disconnect(signal.get(), SIGNAL(new_binary_data(unsigned int, void*, unsigned int)),
+				this, SLOT(on_new_binary_data(unsigned int, void*, unsigned int)));
+		}
+	}
+
+	disconnect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+	disconnect(class_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_class_changed(int)));
+
 	ViewBase::clear_decode_signals();
 
 	reset_data();
 	reset_view_state();
+
+	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+	connect(class_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_class_changed(int)));
 }
 
 void View::add_decode_signal(shared_ptr<data::DecodeSignal> signal)
@@ -199,6 +248,23 @@ void View::add_decode_signal(shared_ptr<data::DecodeSignal> signal)
 
 void View::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
 {
+	disconnect(signal.get(), SIGNAL(name_changed(const QString&)),
+		this, SLOT(on_signal_name_changed(const QString&)));
+	disconnect(signal.get(), SIGNAL(decoder_stacked(void*)),
+		this, SLOT(on_decoder_stacked(void*)));
+	disconnect(signal.get(), SIGNAL(decoder_removed(void*)),
+		this, SLOT(on_decoder_removed(void*)));
+
+	if (signal.get() == signal_) {
+		disconnect(signal.get(), SIGNAL(new_binary_data(unsigned int, void*, unsigned int)),
+			this, SLOT(on_new_binary_data(unsigned int, void*, unsigned int)));
+	}
+
+	disconnect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+	disconnect(class_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_class_changed(int)));
+
 	// Remove all decoders provided by this signal
 	for (const shared_ptr<Decoder>& dec : signal->decoder_stack()) {
 		int index = decoder_selector_->findData(QVariant::fromValue((void*)dec.get()));
@@ -214,6 +280,11 @@ void View::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
 		update_data();
 		reset_view_state();
 	}
+
+	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+	connect(class_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_class_changed(int)));
 }
 
 void View::save_settings(QSettings &settings) const
@@ -230,6 +301,8 @@ void View::restore_settings(QSettings &settings)
 
 void View::reset_data()
 {
+	delayed_view_updater_.stop();
+
 	signal_ = nullptr;
 	decoder_ = nullptr;
 	bin_class_id_ = 0;
@@ -331,18 +404,10 @@ void View::save_data_as_hex_dump(bool with_offset, bool with_ascii) const
 		while (offset < selection.second) {
 			size_t end = std::min((uint64_t)(selection.second), offset + n);
 			offset = hex_view_->create_hex_line(offset, end, &s, with_offset, with_ascii);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-			out_stream << s << Qt::endl;
-#else
 			out_stream << s << endl;
-#endif
 		}
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-		out_stream << Qt::endl;
-#else
 		out_stream << endl;
-#endif
 
 		if (out_stream.status() != QTextStream::Ok) {
 			QMessageBox msg(parent_);
@@ -503,6 +568,17 @@ void View::on_metadata_object_changed(MetadataObject* obj,
 
 	if (obj->type() == MetadataObjMousePos)
 		hex_view_->set_highlighted_data_sample(obj->value(MetadataValueStartSample).toLongLong());
+}
+
+void View::capture_state_updated(int state)
+{
+	if (state == Session::Running) {
+		delayed_view_updater_.stop();
+		binary_data_exists_ = false;
+		hex_view_->clear();
+	}
+
+	ViewBase::capture_state_updated(state);
 }
 
 void View::perform_delayed_view_update()

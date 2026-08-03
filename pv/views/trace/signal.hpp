@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -79,6 +81,7 @@ public:
 	 */
 	virtual vector<data::LogicSegment::EdgePair> get_nearest_level_changes(uint64_t sample_pos) = 0;
 
+	virtual shared_ptr<pv::data::LogicSegment> get_logic_segment_to_paint() const = 0;
 	/**
 	 * Returns true if the trace is visible and enabled.
 	 */

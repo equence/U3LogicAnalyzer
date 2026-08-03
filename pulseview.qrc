@@ -1,10 +1,12 @@
 <RCC>
     <qresource prefix="/">
-	<file>icons/add-decoder.svg</file>
+	<file>icons/add-decoder.png</file>
 	<file>icons/add-math-signal.svg</file>
 	<file>icons/application-exit.png</file>
 	<file>icons/channels.svg</file>
+	<file>icons/channels.png</file>
 	<file>icons/decoder-delete.svg</file>
+	<file>icons/decode_result.png</file>
 	<file>icons/decoder-hidden.svg</file>
 	<file>icons/decoder-shown.svg</file>
 	<file>icons/document-new.png</file>
@@ -26,7 +28,7 @@
 	<file>icons/status-green.svg</file>
 	<file>icons/status-grey.svg</file>
 	<file>icons/status-red.svg</file>
-	<file>icons/show-cursors.svg</file>
+	<file>icons/show-cursors.png</file>
 	<file>icons/trigger-change.svg</file>
 	<file>icons/trigger-falling.svg</file>
 	<file>icons/trigger-high.svg</file>
@@ -45,6 +47,16 @@
 	<file>icons/zoom-fit-best.png</file>
 	<file>icons/zoom-in.png</file>
 	<file>icons/zoom-out.png</file>
+	<file>icons/Start.png</file>
+	<file>icons/Stop.png</file>
+	<file>icons/capture-mode.png</file>
+	<file>icons/Single.png</file>
+	<file>icons/Repeat.png</file>
+	<file>icons/Help.png</file>
+	<file>icons/Demo.png</file>
+	<file>icons/File.png</file>
+	<file>icons/USB20.png</file>
+	<file>icons/USB30.png</file>
     </qresource>
 
     <qresource prefix="/">

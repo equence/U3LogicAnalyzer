@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,6 +42,16 @@ using std::vector;
 
 namespace pv {
 namespace util {
+
+enum class WchDeviceType {
+	None,
+	CH569,
+	CH32H417
+};
+
+WchDeviceType get_wch_device_type(const QString& vendorName);
+WchDeviceType get_wch_device_type_by_driver(const string& driverName);
+bool is_wch_device(const QString& vendorName);
 
 enum class TimeUnit {
 	None = 0,

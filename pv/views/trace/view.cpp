@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,7 +44,7 @@
 #include <libsigrokcxx/libsigrokcxx.hpp>
 
 #include "view.hpp"
-
+#include "pv/toolbars/mainbar.hpp"
 #include "pv/globalsettings.hpp"
 #include "pv/metadata_obj.hpp"
 #include "pv/session.hpp"
@@ -61,10 +63,11 @@
 #include "pv/views/trace/triggermarker.hpp"
 #include "pv/views/trace/viewport.hpp"
 
+
 #ifdef ENABLE_DECODE
 #include "pv/views/trace/decodetrace.hpp"
 #endif
-
+using pv::toolbars::MainBar;
 using pv::data::SignalBase;
 using pv::data::SignalData;
 using pv::data::Segment;
@@ -90,14 +93,15 @@ using std::vector;
 namespace pv {
 namespace views {
 namespace trace {
-
-const Timestamp View::MaxScale("1e9");
-const Timestamp View::MinScale("1e-14");
+#define ABS_DIFF(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
+// 1e4 almost 6H
+const Timestamp View::MaxScale("2500");
+const Timestamp View::MinScale("1e-12");
 
 const int View::MaxScrollValue = INT_MAX / 2;
 
 /* Area at the top and bottom of the view that can't be scrolled out of sight */
-const int View::ViewScrollMargin = 50;
+const int View::ViewScrollMargin = 0;
 
 const int View::ScaleUnits[3] = {1, 2, 5};
 
@@ -121,7 +125,14 @@ bool CustomScrollArea::viewportEvent(QEvent *event)
 		return false;
 	default:
 		return QAbstractScrollArea::viewportEvent(event);
+		// break;
 	}
+}
+
+void CustomScrollArea::scrollContentsBy(int dx, int dy)
+{
+	Q_UNUSED(dx);
+	Q_UNUSED(dy);
 }
 
 View::View(Session &session, bool is_main_view, QMainWindow *parent) :
@@ -141,7 +152,6 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	scrollarea_ = new CustomScrollArea(splitter_);
 	scrollarea_->setViewport(viewport_);
 	scrollarea_->setFrameShape(QFrame::NoFrame);
-
 	ruler_ = new Ruler(*this);
 
 	header_ = new Header(*this);
@@ -181,7 +191,6 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	GlobalSettings settings;
 	colored_bg_ = settings.value(GlobalSettings::Key_View_ColoredBG).toBool();
 	snap_distance_ = settings.value(GlobalSettings::Key_View_SnapDistance).toInt();
-
 	GlobalSettings::add_change_handler(this);
 
 	// Set up metadata objects and event handlers
@@ -211,8 +220,14 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 
 	connect(&lazy_event_handler_, SIGNAL(timeout()),
 		this, SLOT(process_sticky_events()));
+
+	connect(viewport_, SIGNAL(add_rule_flag(QMouseEvent*)), ruler_, SLOT(on_add_RuleFlag(QMouseEvent*)));
 	lazy_event_handler_.setSingleShot(true);
 	lazy_event_handler_.setInterval(1000 / ViewBase::MaxViewAutoUpdateRate);
+
+	measure_timer_.setSingleShot(true);
+	measure_timer_.setInterval(50);
+	connect(&measure_timer_, &QTimer::timeout, this, &View::renew_measure);
 
 	// Set up local keyboard shortcuts
 	zoom_in_shortcut_ = new QShortcut(QKeySequence(Qt::Key_Plus), this,
@@ -261,7 +276,6 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	// Make sure the transparent widgets are on the top
 	ruler_->raise();
 	header_->raise();
-
 	reset_view_state();
 }
 
@@ -375,8 +389,14 @@ void View::add_signalbase(const shared_ptr<data::SignalBase> signalbase)
 		assert(false);
 		break;
 	}
-
 	signals_.push_back(signal);
+
+	// Connect signal height change for logic signals
+	// Note: LogicSignal constructor can't connect this signal because owner_ is nullptr at that time
+	if (signalbase->type() == SignalBase::LogicChannel) {
+		connect(this, SIGNAL(signal_height_change(int)),
+			signal.get(), SLOT(on_signal_height_changed(int)));
+	}
 
 	signal->set_segment_display_mode(segment_display_mode_);
 	signal->set_current_segment(current_segment_);
@@ -417,12 +437,13 @@ void View::add_decode_signal(shared_ptr<data::DecodeSignal> signal)
 	shared_ptr<DecodeTrace> d(
 		new DecodeTrace(session_, signal, decode_traces_.size()));
 	decode_traces_.push_back(d);
-
+	connect(this, SIGNAL(decode_signal_height_change(int)), d.get(), SLOT(on_signal_height_change(int)));
 	d->set_segment_display_mode(segment_display_mode_);
 	d->set_current_segment(current_segment_);
 
 	connect(signal.get(), SIGNAL(name_changed(const QString&)),
 		this, SLOT(on_signal_name_changed()));
+	update_signals_height();
 }
 
 void View::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
@@ -434,14 +455,15 @@ void View::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
 		}
 
 	ViewBase::remove_decode_signal(signal);
+	update_signals_height();
 }
 #endif
 
 void View::remove_trace(shared_ptr<Trace> trace)
 {
 	TraceTreeItemOwner *const owner = trace->owner();
-	assert(owner);
-	owner->remove_child_item(trace);
+	if (owner)
+		owner->remove_child_item(trace);
 
 	for (auto i = signals_.begin(); i != signals_.end(); i++)
 		if ((*i) == trace) {
@@ -540,7 +562,14 @@ void View::restore_settings(QSettings &settings)
 			(Trace::SegmentDisplayMode)(settings.value("segment_display_mode").toInt()));
 
 	for (shared_ptr<Signal> signal : signals_) {
-		settings.beginGroup(signal->base()->internal_name());
+		QString group_key = signal->base()->internal_name();
+		if (!settings.childGroups().contains(group_key)) {
+			QString prefix = (signal->base()->type() == data::SignalBase::AnalogChannel) ? "A" : "D";
+			QString fallback_key = prefix + QString::number(signal->base()->index());
+			if (settings.childGroups().contains(fallback_key))
+				group_key = fallback_key;
+		}
+		settings.beginGroup(group_key);
 		signal->restore_settings(settings);
 		settings.endGroup();
 	}
@@ -592,8 +621,13 @@ void View::set_scale(double scale)
 
 void View::set_offset(const pv::util::Timestamp& offset, bool force_update)
 {
-	if ((offset_ != offset) || force_update) {
-		offset_ = offset;
+	// Clamp offset to non-negative to prevent negative time axis
+	pv::util::Timestamp clamped = offset;
+	if (clamped < pv::util::Timestamp(0))
+		clamped = pv::util::Timestamp(0);
+
+	if ((offset_ != clamped) || force_update) {
+		offset_ = clamped;
 		ruler_offset_ = offset_ + zero_offset_;
 
 		update_view_range_metaobject();
@@ -828,7 +862,7 @@ void View::zoom(double steps)
 
 void View::zoom(double steps, int offset)
 {
-	set_zoom(scale_ * pow(3.0 / 2.0, -steps), offset);
+	set_zoom(scale_ * pow(1.2, -steps), offset);
 }
 
 void View::zoom_fit(bool gui_state)
@@ -870,18 +904,19 @@ void View::focus_on_range(uint64_t start_sample, uint64_t end_sample)
 	const uint64_t sample_delta = (end_sample - start_sample);
 
 	// Note: We add 20% margin on the left and 5% on the right
-	const uint64_t ext_sample_delta = sample_delta * 1.25;
+	const uint64_t ext_sample_delta = sample_delta * 2.25;
 
 	// Check if we can keep the zoom level and just center the supplied range
-	if (viewport_samples >= ext_sample_delta) {
+	if (/*viewport_samples >= ext_sample_delta*/0) {
 		// Note: offset is the left edge of the view so to center, we subtract half the view width
 		const int64_t sample_offset = (start_sample + (sample_delta / 2) - (viewport_samples / 2));
 		const Timestamp offset = sample_offset / samplerate;
 		set_scale_offset(scale_, offset);
 	} else {
-		const Timestamp offset = (start_sample - sample_delta * 0.20) / samplerate;
-		const Timestamp delta = ext_sample_delta / samplerate;
-		const Timestamp scale = max(min(delta / w, MaxScale), MinScale);
+		Timestamp offset = (start_sample - sample_delta * 0.20) / samplerate;
+		Timestamp delta = ext_sample_delta / samplerate;
+		Timestamp scale = max(min(delta / w, MaxScale), MinScale);
+		if (offset < 0) offset = 0.0f;
 		set_scale_offset(scale.convert_to<double>(), offset);
 	}
 }
@@ -1011,13 +1046,18 @@ shared_ptr<CursorPair> View::cursors() const
 
 shared_ptr<Flag> View::add_flag(const Timestamp& time)
 {
+	QString newtext = pv::util::format_time_si(
+		time, pv::util::SIPrefix::none, 6);
 	shared_ptr<Flag> flag =
-		make_shared<Flag>(*this, time, QString("%1").arg(next_flag_text_));
+		make_shared<Flag>(*this, time, newtext);
 	flags_.push_back(flag);
-
+	connect(this, SIGNAL(press_delete()), flag.get(), SLOT(on_press_delete()));
 	next_flag_text_ = (next_flag_text_ >= 'Z') ? 'A' :
 		(next_flag_text_ + 1);
-
+	int index = next_flag_text_- 'A';
+	index = qMax(index, 0);
+	QString index_str = QString::number(index);
+	flag->set_index_text(index_str);
 	time_item_appearance_changed(true, true);
 	return flag;
 }
@@ -1049,7 +1089,7 @@ const QWidget* View::hover_widget() const
 	return hover_widget_;
 }
 
-int64_t View::get_nearest_level_change(const QPoint &p)
+uint64_t View::get_nearest_level_change(const QPoint &p)
 {
 	// Is snapping disabled?
 	if (snap_distance_ == 0)
@@ -1060,51 +1100,49 @@ int64_t View::get_nearest_level_change(const QPoint &p)
 			signal(s), delta(numeric_limits<int64_t>::max()), sample(-1), is_dense(false) {}
 		shared_ptr<Signal> signal;
 		int64_t delta;
-		int64_t sample;
+		uint64_t sample;
 		bool is_dense;
 	};
 
 	vector<entry_t> list;
-
 	// Create list of signals to consider
-	if (signal_under_mouse_cursor_)
+	if (signal_under_mouse_cursor_){
 		list.emplace_back(signal_under_mouse_cursor_);
-	else
+	}
+	else{
 		for (shared_ptr<Signal> s : signals_) {
 			if (!s->enabled())
 				continue;
 
 			list.emplace_back(s);
 		}
-
+	}
 	// Get data for listed signals
 	for (entry_t &e : list) {
 		// Calculate sample number from cursor position
-		const double samples_per_pixel = e.signal->base()->get_samplerate() * scale();
-		const int64_t x_offset = offset().convert_to<double>() / scale();
-		const int64_t sample_num = max(((x_offset + p.x()) * samples_per_pixel), 0.0);
-
-		vector<data::LogicSegment::EdgePair> edges =
-			e.signal->get_nearest_level_changes(sample_num);
-
+		// const double samples_per_pixel = e.signal->base()->get_samplerate() * scale();
+		const double samples_per_pixel = session_.get_samplerate() * scale();
+		const uint64_t x_offset = offset().convert_to<double>() / scale();
+		const uint64_t sample_num = max(((x_offset + p.x()) * samples_per_pixel), 0.0);
+		vector<data::LogicSegment::EdgePair> edges;
+		edges = e.signal->get_nearest_level_changes(sample_num);
 		if (edges.empty())
 			continue;
-
 		// Check first edge
-		const int64_t first_sample_delta = abs(sample_num - edges.front().first);
-		const int64_t first_delta = first_sample_delta / samples_per_pixel;
+		const uint64_t first_sample_delta = (sample_num - edges.front().first);
+		const uint64_t first_delta = first_sample_delta / samples_per_pixel;
 		e.delta = first_delta;
 		e.sample = edges.front().first;
-
 		// Check second edge if available
 		if (edges.size() == 2) {
 			// Note: -1 because this is usually the right edge and sample points are left-aligned
-			const int64_t second_sample_delta = abs(sample_num - edges.back().first - 1);
-			const int64_t second_delta = second_sample_delta / samples_per_pixel;
-
+			const uint64_t second_sample_delta = sample_num - (edges.back().first - 1);
+			const uint64_t second_delta = second_sample_delta / samples_per_pixel;
 			// If both edges are too close, we mark this signal as being dense
-			if ((first_delta + second_delta) <= snap_distance_)
-				e.is_dense = true;
+			if ((first_delta + second_delta) <= snap_distance_){
+				// e.is_dense = true;
+				e.is_dense = false;
+			}
 
 			if (second_delta < first_delta) {
 				e.delta = second_delta;
@@ -1143,10 +1181,9 @@ int64_t View::get_nearest_level_change(const QPoint &p)
 	if (match) {
 		// Somewhat ugly hack to make TimeItem::drag_by() work
 		signal_under_mouse_cursor_ = match->signal;
-
+		
 		return match->sample;
 	}
-
 	return -1;
 }
 
@@ -1177,6 +1214,16 @@ int View::header_width() const
 	 return header_->extended_size_hint().width();
 }
 
+int View::viewport_width()
+{
+	return viewport_->width();
+}
+
+int View::viewport_height()
+{
+	return viewport_->height();
+}
+
 void View::on_setting_changed(const QString &key, const QVariant &value)
 {
 	GlobalSettings settings;
@@ -1205,7 +1252,6 @@ void View::trigger_event(int segment_id, util::Timestamp location)
 
 	if (!custom_zero_offset_set_)
 		reset_zero_position();
-
 	trigger_markers_.push_back(make_shared<TriggerMarker>(*this, location));
 }
 
@@ -1223,15 +1269,15 @@ void View::set_zoom(double scale, int offset)
 	always_zoom_to_fit_changed(false);
 
 	const Timestamp cursor_offset = offset_ + scale_ * offset;
-	const Timestamp new_scale = max(min(Timestamp(scale), MaxScale), MinScale);
+	const Timestamp new_scale = max(min(Timestamp(scale), Timestamp(current_max_scale_)), MinScale);
 	const Timestamp new_offset = cursor_offset - new_scale * offset;
 	set_scale_offset(new_scale.convert_to<double>(), new_offset);
 }
 
 void View::calculate_tick_spacing()
 {
-	const double SpacingIncrement = 10.0f;
-	const double MinValueSpacing = 40.0f;
+	const double SpacingIncrement = 5.0f;
+	const double MinValueSpacing = 20.0f;
 
 	// Figure out the highest numeric value visible on a label
 	const QSize areaSize = viewport_->size();
@@ -1270,7 +1316,7 @@ void View::calculate_tick_spacing()
 				(ScaleUnits[unit++] + tp_margin);
 		} while (tp_with_margin < min_period && unit < countof(ScaleUnits));
 
-		minor_tick_count_ = (unit == 2) ? 4 : 5;
+		minor_tick_count_ = (unit == 2) ? 8 : 10;
 		tick_period = order_decimal * ScaleUnits[unit - 1];
 		tick_prefix = static_cast<pv::util::SIPrefix>(
 			(order - pv::util::exponent(pv::util::SIPrefix::yocto)) / 3);
@@ -1308,15 +1354,7 @@ void View::adjust_top_margin()
 
 	// Do we have empty space at the top while the last trace goes out of screen?
 	if ((top_margin > 0) && (trace_bottom > areaSize.height())) {
-		const int trace_height = extents.second - extents.first;
-
-		// Center everything vertically if there is enough space
-		if (areaSize.height() >= trace_height)
-			set_v_offset(extents.first -
-				((areaSize.height() - trace_height) / 2));
-		else
-			// Remove the top margin to make as many traces fit on screen as possible
-			set_v_offset(extents.first);
+		set_v_offset(extents.first);
 	}
 }
 
@@ -1353,6 +1391,8 @@ void View::update_scroll()
 	updating_scroll_ = false;
 
 	// Set the vertical scrollbar
+	// Save current position before modifying range/pageStep, which may reset it
+	const int saved_v_pos = vscrollbar->sliderPosition();
 	vscrollbar->setPageStep(areaSize.height());
 	vscrollbar->setSingleStep(areaSize.height() / 8);
 
@@ -1363,9 +1403,13 @@ void View::update_scroll()
 		int top_margin = ViewScrollMargin;
 		int btm_margin = ViewScrollMargin;
 
-		vscrollbar->setRange(extents.first - areaSize.height() + top_margin,
-			extents.second - btm_margin);
+		// Limit min scroll to extents.first to prevent scrolling above signals
+		int min_scroll = max(extents.first, extents.first - areaSize.height() + top_margin);
+		vscrollbar->setRange(min_scroll, extents.second - btm_margin);
 	}
+
+	// Restore vertical position that setRange/setPageStep may have changed
+	vscrollbar->setSliderPosition(saved_v_pos);
 
 	if (scroll_needs_defaults_) {
 		set_scroll_default();
@@ -1382,19 +1426,8 @@ void View::set_scroll_default()
 {
 	assert(viewport_);
 
-	const QSize areaSize = viewport_->size();
-
 	const pair<int, int> extents = v_extents();
-	const int trace_height = extents.second - extents.first;
-
-	// Do all traces fit in the view?
-	if (areaSize.height() >= trace_height)
-		// Center all traces vertically
-		set_v_offset(extents.first -
-			((areaSize.height() - trace_height) / 2));
-	else
-		// Put the first trace at the top, letting the bottom ones overflow
-		set_v_offset(extents.first);
+	set_v_offset(extents.first);
 }
 
 void View::determine_if_header_was_shrunk()
@@ -1515,10 +1548,18 @@ void View::determine_time_unit()
 	}
 }
 
+void View::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Delete) {
+        press_delete();
+    } else {
+        QWidget::keyPressEvent(event);
+    }
+}
+
 bool View::eventFilter(QObject *object, QEvent *event)
 {
 	const QEvent::Type type = event->type();
-
 	if (type == QEvent::MouseMove) {
 
 		if (object)
@@ -1530,16 +1571,26 @@ bool View::eventFilter(QObject *object, QEvent *event)
 		else if (object == ruler_)
 			hover_point_ = mouse_event->pos();
 		else if (object == header_)
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-			hover_point_ = QPoint(0, mouse_event->pos().y());
-#else
 			hover_point_ = QPoint(0, mouse_event->y());
-#endif
 		else
 			hover_point_ = QPoint(-1, -1);
 
 		update_hover_point();
-
+		////////////////////
+		if (/*object == viewport_*/1) {
+			if (viewport_->bezier_start_ == QPointF(0,0)) {
+				if (!measure_timer_.isActive())
+					measure_timer_.start();
+			} else {
+				if (!grabbed_widget_) {
+					viewport()->update();
+					renew_bezier_measure();
+				}
+				else
+					viewport_->bezier_start_ = QPointF(0, 0);
+			}
+		}
+		////////////////////
 		if (grabbed_widget_) {
 			int64_t nearest = get_nearest_level_change(hover_point_);
 			pv::util::Timestamp mouse_time = offset_ + hover_point_.x() * scale_;
@@ -1550,21 +1601,52 @@ bool View::eventFilter(QObject *object, QEvent *event)
 				grabbed_widget_->set_time(nearest / get_signal_under_mouse_cursor()->base()->get_samplerate());
 			}
 		}
+		// show Measure
 
+	} else if (type == QEvent::MouseButtonDblClick) {
+		viewport_->bezier_start_ = QPointF(0, 0);
 	} else if (type == QEvent::MouseButtonPress) {
 		grabbed_widget_ = nullptr;
-
 		const QMouseEvent *const mouse_event = (QMouseEvent*)event;
 		if ((object == viewport_) && (mouse_event->button() & Qt::LeftButton)) {
 			// Send event to all trace tree items
 			const vector<shared_ptr<TraceTreeItem>> trace_tree_items(
 				list_by_type<TraceTreeItem>());
-			for (const shared_ptr<TraceTreeItem>& r : trace_tree_items)
+			for (const shared_ptr<TraceTreeItem>& r : trace_tree_items) {
 				r->mouse_left_press_event(mouse_event);
+			}
+			const shared_ptr<ViewItem> r = viewport_->get_mouse_over_item(mouse_event->pos());
+			if (r != nullptr) {
+				if (r->selected() && r->is_draggable(mouse_event->pos())) {
+					viewport_->bezier_start_ = QPointF(0, 0);
+				} else {
+					update_hover_point();
+					//drawing bezier now 
+					//close rightnow bezier drawing
+					if (viewport_->bezier_start_ != QPointF(0, 0)) {
+						viewport_->bezier_start_ = QPointF(0, 0);
+						viewport()->update();
+					} else {
+						////////////////////
+						renew_bezier_measure();
+						////////////////////
+					}
+				} 
+			}
+			
+		}
+		if ((object == header_) && (mouse_event->button() & Qt::LeftButton)) {
+			is_press_header_ = true;
+		}else{
+			is_press_header_ = false;
 		}
 	} else if (type == QEvent::Leave) {
 		hover_point_ = QPoint(-1, -1);
 		update_hover_point();
+		viewport_->SetMeasurePoint(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0));
+		viewport_->bezier_start_ = QPointF(0, 0);
+		viewport_->bezier_end_ = QPointF(0, 0);
+		viewport()->update();
 	} else if (type == QEvent::Show) {
 
 		// This is somewhat of a hack, unfortunately. We cannot use
@@ -1586,11 +1668,224 @@ bool View::eventFilter(QObject *object, QEvent *event)
 			scroll_needs_defaults_ = false;
 		}
 
-		if (restoring_state_)
+		if (restoring_state_) {
 			set_v_offset(saved_v_offset_);
+			restoring_state_ = false;
+		}
 	}
 
 	return QObject::eventFilter(object, event);
+}
+
+uint64_t View::get_leftmost_samples()
+{
+	double samples_per_pixel = session_.get_samplerate() * scale_;
+	int64_t x_offset = offset_.convert_to<double>() / scale_;
+	int64_t sample_num = max((x_offset * samples_per_pixel), 0.0);
+	return max((uint64_t)0, (uint64_t)sample_num);
+}
+
+uint64_t View::get_rightmost_samples()
+{
+	double samples_per_pixel = session_.get_samplerate() * scale_;
+	int64_t x_offset = offset_.convert_to<double>() / scale_;
+	int64_t sample_num = max(((x_offset + viewport_width()) * samples_per_pixel), 0.0);
+	return min((uint64_t)session_.get_segment_sample_count(0), (uint64_t)sample_num);
+}
+
+float View::update_bezier_start()
+{
+	return roundf(((bezier_start_sample_ / session_.get_samplerate() - offset()) / scale()).convert_to<float>()) + 0.5f;
+}
+
+void View::renew_bezier_measure()
+{
+	bool find_edge = false;
+	bool find_match = false;
+	float point_x, point_y;
+	uint8_t edge_index = 0;
+	vector<data::LogicSegment::EdgePair> edges;
+	static pv::util::Timestamp t_start;
+	// find dose need point exist  
+	if (signal_under_mouse_cursor_ != nullptr && session_.get_capture_state() == Session::Stopped && viewport_->bezier_start_ != QPointF(0, 0) && signal_under_mouse_cursor_->get_logic_segment_to_paint() == nullptr) {
+		viewport_->bezier_end_ = hover_point_;
+		return;
+	}
+	if (signal_under_mouse_cursor_ != nullptr && session_.get_capture_state() == Session::Stopped && signal_under_mouse_cursor_->get_logic_segment_to_paint() != nullptr)
+	{
+		int64_t nearest = get_nearest_level_change(hover_point_);
+		if (nearest != -1)
+		{
+			pv::util::Timestamp t;		
+			const double samples_per_pixel = session_.get_samplerate() * scale();
+			const int64_t x_offset = offset().convert_to<double>() / scale();
+			const uint64_t sample_num = max(((x_offset + hover_point_.x()) * samples_per_pixel), 0.0);
+			float distance_left_edge = INT_MAX; float distance_right_edge = INT_MAX; float distance_sample = 0;
+
+			edges = signal_under_mouse_cursor_->get_nearest_level_changes(sample_num);
+			find_edge = true;
+			if (edges.size() == 2) {
+				t = edges[0].first / session_.get_samplerate();
+				distance_left_edge = roundf(((t - offset()) / scale()).convert_to<float>()) + 0.5f;
+				t = edges[1].first / session_.get_samplerate();
+				distance_right_edge = roundf(((t - offset()) / scale()).convert_to<float>()) + 0.5f;
+			} else if (edges.size() == 1) {
+				t = edges[0].first / session_.get_samplerate();
+				distance_left_edge = roundf(((t - offset()) / scale()).convert_to<float>()) + 0.5f;
+			} else {
+				find_edge = false;
+			}
+			// current_mouse_time
+			t = offset_ + hover_point_.x() * scale_;
+			distance_sample = roundf(((t - offset()) / scale()).convert_to<float>()) + 0.5f;
+			if (find_edge) {
+				float distance_0 = ABS_DIFF(distance_left_edge, distance_sample);
+				float distance_1 = ABS_DIFF(distance_right_edge, distance_sample);
+				if (distance_0 < 18.0 || distance_1 < 18.0) {
+					if (distance_0 < distance_1) {
+						point_x = roundf(((edges[0].first / session_.get_samplerate() - offset()) / scale()).convert_to<float>()) + 0.5f;
+						edge_index = 0;
+					} else {
+						point_x = roundf(((edges[1].first / session_.get_samplerate() - offset()) / scale()).convert_to<float>()) + 0.5f;
+						edge_index = 1;
+					}
+					find_match = true;
+				}		
+				if (find_match) {
+					// y axis offset
+					for (const shared_ptr<Signal> &s : signals_)
+					{
+						if (s == signal_under_mouse_cursor_)
+						{
+							const pair<int, int> extents = s->v_extents();
+							const int top = s->get_visual_y() + extents.first;
+							const int btm = s->get_visual_y() + extents.second;
+							if ((hover_point_.y() >= top) && (hover_point_.y() <= btm) && s->base()->enabled())
+							{
+								point_y = top + ((btm - top) / 2.0);	
+							}
+							break;
+						}
+					}
+				}
+			}
+			if (viewport_->bezier_start_ == QPointF(0, 0)) {
+				if (find_match) {
+					viewport_->bezier_start_ = QPointF(point_x,point_y);
+					t_start = edges[edge_index].first / session_.get_samplerate();
+					bezier_start_sample_ = edges[edge_index].first;
+				} else {
+					viewport_->bezier_start_ = QPointF(0, 0);
+					t_start = 0;
+				}
+				viewport_->bezier_end_ = hover_point_;	
+			} else {
+				viewport_->bezier_end_ = (find_match && QPointF(point_x,point_y) != viewport_->bezier_start_)? QPointF(point_x,point_y) : hover_point_;
+				// Use unspecified prefix to auto-select appropriate unit
+				if (find_match) {
+					t = edges[edge_index].first / session_.get_samplerate();
+				} else {
+					t = offset_ + hover_point_.x() * scale_;
+				}
+				pv::util::Timestamp diff = abs(t - t_start);
+				viewport_->bezier_width_ = Ruler::format_time_with_distance(
+						diff, diff, pv::util::SIPrefix::unspecified, (time_unit()),
+							6, false);
+			}
+		}
+	}
+}
+
+void View::renew_measure()
+{
+	if (signal_under_mouse_cursor_ != nullptr && session_.get_capture_state() == Session::Stopped)
+	{
+		int64_t nearest = get_nearest_level_change(hover_point_);
+		if (nearest != -1)
+		{
+			QPointF startPoint, midPoint, endPoint;
+			// y axis offset
+			for (const shared_ptr<Signal> &s : signals_)
+			{
+				if (s == signal_under_mouse_cursor_)
+				{
+					const pair<int, int> extents = s->v_extents();
+					const int top = s->get_visual_y() + extents.first;
+					const int btm = s->get_visual_y() + extents.second;
+					if ((hover_point_.y() >= top) && (hover_point_.y() <= btm) && s->base()->enabled())
+					{
+						startPoint.setY(top + ((btm - top) / 2.0));
+						midPoint.setY(startPoint.y());
+						endPoint.setY(startPoint.y());
+					}
+					break;
+				}
+			}
+
+			const double samples_per_pixel = session_.get_samplerate() * scale();
+			const int64_t x_offset = offset().convert_to<double>() / scale();
+			const uint64_t sample_num = max(((x_offset + hover_point_.x()) * samples_per_pixel), 0.0);
+			vector<data::LogicSegment::EdgePair> edges;
+			edges = signal_under_mouse_cursor_->get_nearest_level_changes(sample_num);
+			if (edges.size() == 2)
+			{
+				// check left edge ,right edge, mid edge
+				// left edge x axis
+				uint64_t start_sample = edges[0].first;
+				uint64_t mid_sample = edges[1].first;
+				uint64_t end_sample = 0;
+				edges = signal_under_mouse_cursor_->get_nearest_level_changes(mid_sample);
+				for (int i = 0;i < edges.size(); i++) {
+					if (edges[i].first > mid_sample) {
+						end_sample = edges[i].first;
+						break;
+					}
+				}
+				if (end_sample != 0)
+				{
+					pv::util::Timestamp t1, t2, t3;
+					t1 = start_sample / session_.get_samplerate();
+					t2 = mid_sample / session_.get_samplerate();
+					t3 = end_sample / session_.get_samplerate();
+					startPoint.setX(roundf(((t1 - offset()) / scale()).convert_to<float>()) + 0.5f);
+					midPoint.setX(roundf(((t2 - offset()) / scale()).convert_to<float>()) + 0.5f);
+					endPoint.setX(roundf(((t3 - offset()) / scale()).convert_to<float>()) + 0.5f);
+					// paint
+					//width - use unspecified prefix to auto-select appropriate unit
+					pv::util::Timestamp diff = abs(t2 - t1);
+					viewport_->width_ = Ruler::format_time_with_distance(
+						diff, diff, pv::util::SIPrefix::unspecified, (time_unit()),
+							6, false);
+					diff = t3 - t1;
+					viewport_->period_ = Ruler::format_time_with_distance(
+						diff, diff, pv::util::SIPrefix::unspecified, (time_unit()),
+							6, false);
+					viewport_->freq_ = util::format_value_si(
+						1 / diff.convert_to<double>(), pv::util::SIPrefix::unspecified,
+						6, ("Hz"), false);
+					char str[64] = "";
+					sprintf(str, "%.2f%%", (double)(t2-t1) / (double)(t3-t1) * 100.00);
+					viewport_->duty_cycle_ = QString::fromUtf8(str);
+					viewport_->SetMeasurePoint(startPoint, midPoint, endPoint);
+				}
+				else
+				{
+					viewport_->SetMeasurePoint(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0));
+				}
+			}
+			else
+			{
+				viewport_->SetMeasurePoint(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0));
+			}
+		}
+		else
+		{
+			viewport_->SetMeasurePoint(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0));
+		}
+	}
+	else{
+		viewport_->SetMeasurePoint(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0));
+	}
 }
 
 void View::contextMenuEvent(QContextMenuEvent *event)
@@ -1598,22 +1893,10 @@ void View::contextMenuEvent(QContextMenuEvent *event)
 	QPoint pos = event->pos() - QPoint(0, ruler_->sizeHint().height());
 
 	const shared_ptr<ViewItem> r = viewport_->get_mouse_over_item(pos);
+	if (!r)
+		return;
 
-	QMenu* menu = nullptr;
-
-	if (!r) {
-		context_menu_x_pos_ = pos.x();
-
-		// No view item under cursor, use generic menu
-		menu = new QMenu(this);
-
-		QAction *const create_marker_here = new QAction(tr("Create marker here"), this);
-		connect(create_marker_here, SIGNAL(triggered()), this, SLOT(on_create_marker_here()));
-		menu->addAction(create_marker_here);
-	} else {
-		menu = r->create_view_context_menu(this, pos);
-	}
-
+	QMenu *menu = r->create_view_context_menu(this, pos);
 	if (menu)
 		menu->popup(event->globalPos());
 }
@@ -1623,8 +1906,82 @@ void View::resizeEvent(QResizeEvent* event)
 	// Only adjust the top margin if we shrunk vertically
 	if (event->size().height() < event->oldSize().height())
 		adjust_top_margin();
-
 	update_layout();
+	// emit signal change trace height
+	update_scale_offset();
+	update_signals_height();
+}
+
+void View::update_restore_logic_height(int height)
+{
+	restore_min_logic_height_ = min(restore_min_logic_height_, height);
+}
+
+void View::update_header()
+{
+	header_->update();
+}
+
+Header* View::header()
+{
+	return header_;
+}
+
+void View::update_signals_height()
+{
+	// if (restoring_state_)
+	// 	return;
+
+	// const QSize areaSize = viewport_->size();
+
+	// if (areaSize.height() <= 0)
+	// 	return;
+
+	// const int signal_margin =
+	// 	QFontMetrics(QApplication::font()).height() / 2;
+
+	// int logic_signal_num = 0;
+	// for (const auto& signal : signals_) {
+	// 	if (signal->enabled() &&
+	// 		signal->base()->type() == data::SignalBase::LogicChannel) {
+	// 		logic_signal_num++;
+	// 	}
+	// }
+
+	// if (logic_signal_num <= 0)
+	// 	return;
+
+	// float decode_signal_height = 0;
+	// for (const auto& trace : decode_traces_) {
+	// 	pair<int, int> extents = trace->v_extents();
+	// 	decode_signal_height += abs(extents.second - extents.first);
+	// }
+
+	// float analog_signal_height = 0;
+	// for (const auto& signal : signals_) {
+	// 	if (signal->enabled() &&
+	// 		signal->base()->type() == data::SignalBase::AnalogChannel) {
+	// 		pair<int, int> extents = signal->v_extents();
+	// 		analog_signal_height += abs(extents.second - extents.first);
+	// 	}
+	// }
+
+	// const int top_bottom_margin = signal_margin * 2;
+
+	// float signal_free_height = areaSize.height()
+	// 	- decode_signal_height
+	// 	- analog_signal_height
+	// 	- top_bottom_margin;
+
+	// int calculated_height = static_cast<int>(signal_free_height / logic_signal_num)
+	// 	- (2 * signal_margin);
+
+	// const int min_height = 20;
+	// const int max_height = 50;
+
+	// int height = std::max(std::min(calculated_height, max_height), min_height);
+
+	// signal_height_change(height);
 }
 
 void View::update_view_range_metaobject() const
@@ -1656,23 +2013,26 @@ void View::update_hover_point()
 {
 	// Determine signal that the mouse cursor is hovering over
 	signal_under_mouse_cursor_.reset();
-	if (hover_widget_ == this) {
+	signal_under_mouse_cursor_ = nullptr;
+	// if (hover_widget_ == this) {
 		for (const shared_ptr<Signal>& s : signals_) {
 			const pair<int, int> extents = s->v_extents();
 			const int top = s->get_visual_y() + extents.first;
 			const int btm = s->get_visual_y() + extents.second;
 			if ((hover_point_.y() >= top) && (hover_point_.y() <= btm)
-				&& s->base()->enabled())
-				signal_under_mouse_cursor_ = s;
+				&& s->base()->enabled()){
+					signal_under_mouse_cursor_ = s;
+				}
 		}
-	}
+	// }
 
 	// Update all trace tree items
 	const vector<shared_ptr<TraceTreeItem>> trace_tree_items(
 		list_by_type<TraceTreeItem>());
-	for (const shared_ptr<TraceTreeItem>& r : trace_tree_items)
+	for (const shared_ptr<TraceTreeItem>& r : trace_tree_items){
 		r->hover_point_changed(hover_point_);
-
+	}
+		
 	// Notify this view's listeners
 	hover_point_changed(hover_widget_, hover_point_);
 
@@ -1682,7 +2042,7 @@ void View::update_hover_point()
 		pv::util::Timestamp mouse_time = offset_ + hover_point_.x() * scale_;
 		int64_t sample_num = (mouse_time * session_.get_samplerate()).convert_to<int64_t>();
 
-		MetadataObject* md_obj =
+		MetadataObject* md_obj = 
 			session_.metadata_obj_manager()->find_object_by_type(MetadataObjMousePos);
 		md_obj->set_value(MetadataValueStartSample, QVariant((qlonglong)sample_num));
 	}
@@ -1818,6 +2178,7 @@ void View::signals_changed()
 
 	// Do we need to set the vertical scrollbar to its default position later?
 	// We do if there are no traces, i.e. the scroll bar has no range set
+	// Also reset when signals are added/removed (e.g. mode switch from Logic to ADC)
 	bool reset_scrollbar =
 		(scrollarea_->verticalScrollBar()->minimum() ==
 			scrollarea_->verticalScrollBar()->maximum());
@@ -1861,75 +2222,75 @@ void View::signals_changed()
 	for (const shared_ptr<Signal>& sig : signals_)
 		signal_map[sig->base()] = sig;
 
-	// Populate channel groups
-	if (sr_dev)
-		for (auto& entry : sr_dev->channel_groups()) {
-			const shared_ptr<sigrok::ChannelGroup> &group = entry.second;
+	// // Populate channel groups
+	// if (sr_dev)
+	// 	for (auto& entry : sr_dev->channel_groups()) {
+	// 		const shared_ptr<sigrok::ChannelGroup> &group = entry.second;
 
-			if (group->channels().size() <= 1)
-				continue;
+	// 		if (group->channels().size() <= 1)
+	// 			continue;
 
-			// Find best trace group to add to
-			TraceTreeItemOwner *owner = find_prevalent_trace_group(
-				group, signal_map);
+	// 		// Find best trace group to add to
+	// 		TraceTreeItemOwner *owner = find_prevalent_trace_group(
+	// 			group, signal_map);
 
-			// If there is no trace group, create one
-			shared_ptr<TraceGroup> new_trace_group;
-			if (!owner) {
-				new_trace_group.reset(new TraceGroup());
-				owner = new_trace_group.get();
-			}
+	// 		// If there is no trace group, create one
+	// 		shared_ptr<TraceGroup> new_trace_group;
+	// 		if (!owner) {
+	// 			new_trace_group.reset(new TraceGroup());
+	// 			owner = new_trace_group.get();
+	// 		}
 
-			// Extract traces for the trace group, removing them from
-			// the add list
-			const vector< shared_ptr<Trace> > new_traces_in_group =
-				extract_new_traces_for_channels(group->channels(),
-					signal_map, add_traces);
+	// 		// Extract traces for the trace group, removing them from
+	// 		// the add list
+	// 		const vector< shared_ptr<Trace> > new_traces_in_group =
+	// 			extract_new_traces_for_channels(group->channels(),
+	// 				signal_map, add_traces);
 
-			// Add the traces to the group
-			const pair<int, int> prev_v_extents = owner->v_extents();
-			int offset = prev_v_extents.second - prev_v_extents.first;
-			for (const shared_ptr<Trace>& trace : new_traces_in_group) {
-				assert(trace);
-				owner->add_child_item(trace);
+	// 		// Add the traces to the group
+	// 		const pair<int, int> prev_v_extents = owner->v_extents();
+	// 		int offset = prev_v_extents.second - prev_v_extents.first;
+	// 		for (const shared_ptr<Trace>& trace : new_traces_in_group) {
+	// 			assert(trace);
+	// 			owner->add_child_item(trace);
 
-				const pair<int, int> extents = trace->v_extents();
-				if (trace->enabled())
-					offset += -extents.first;
-				trace->force_to_v_offset(offset);
-				if (trace->enabled())
-					offset += extents.second;
-			}
+	// 			const pair<int, int> extents = trace->v_extents();
+	// 			if (trace->enabled())
+	// 				offset += -extents.first;
+	// 			trace->force_to_v_offset(offset);
+	// 			if (trace->enabled())
+	// 				offset += extents.second;
+	// 		}
 
-			if (new_trace_group) {
-				// Assign proper vertical offsets to each channel in the group
-				new_trace_group->restack_items();
+	// 		if (new_trace_group) {
+	// 			// Assign proper vertical offsets to each channel in the group
+	// 			new_trace_group->restack_items();
 
-				// If this is a new group, enqueue it in the new top level
-				// items list
-				if (!new_traces_in_group.empty())
-					new_top_level_items.push_back(new_trace_group);
-			}
-		}
+	// 			// If this is a new group, enqueue it in the new top level
+	// 			// items list
+	// 			if (!new_traces_in_group.empty())
+	// 				new_top_level_items.push_back(new_trace_group);
+	// 		}
+	// 	}
 
-	// Enqueue the remaining logic channels in a group
-	vector< shared_ptr<Channel> > logic_channels;
-	copy_if(channels.begin(), channels.end(), back_inserter(logic_channels),
-		[](const shared_ptr<Channel>& c) {
-			return c->type() == sigrok::ChannelType::LOGIC; });
+	// // Enqueue the remaining logic channels in a group
+	// vector< shared_ptr<Channel> > logic_channels;
+	// copy_if(channels.begin(), channels.end(), back_inserter(logic_channels),
+	// 	[](const shared_ptr<Channel>& c) {
+	// 		return c->type() == sigrok::ChannelType::LOGIC; });
 
-	const vector< shared_ptr<Trace> > non_grouped_logic_signals =
-		extract_new_traces_for_channels(logic_channels,	signal_map, add_traces);
+	// const vector< shared_ptr<Trace> > non_grouped_logic_signals =
+	// 	extract_new_traces_for_channels(logic_channels,	signal_map, add_traces);
 
-	if (non_grouped_logic_signals.size() > 0) {
-		const shared_ptr<TraceGroup> non_grouped_trace_group(
-			make_shared<TraceGroup>());
-		for (const shared_ptr<Trace>& trace : non_grouped_logic_signals)
-			non_grouped_trace_group->add_child_item(trace);
+	// if (non_grouped_logic_signals.size() > 0) {
+	// 	const shared_ptr<TraceGroup> non_grouped_trace_group(
+	// 		make_shared<TraceGroup>());
+	// 	for (const shared_ptr<Trace>& trace : non_grouped_logic_signals)
+	// 		non_grouped_trace_group->add_child_item(trace);
 
-		non_grouped_trace_group->restack_items();
-		new_top_level_items.push_back(non_grouped_trace_group);
-	}
+	// 	non_grouped_trace_group->restack_items();
+	// 	new_top_level_items.push_back(non_grouped_trace_group);
+	// }
 
 	// Enqueue the remaining channels as free ungrouped traces
 	const vector< shared_ptr<Trace> > new_top_level_signals =
@@ -1987,15 +2348,34 @@ void View::signals_changed()
 	header_->update();
 	viewport_->update();
 
+	// Reset scrollbar position when signals were added/removed (e.g. mode switch)
+	if (signals_added_or_removed)
+		reset_scrollbar = true;
+
 	if (reset_scrollbar)
 		set_scroll_default();
+	update_signals_height();
+}
+
+void View::update_scale_offset(bool is_set)
+{
+	//set max scale
+	int w = viewport_->width();
+	std::shared_ptr<pv::toolbars::MainBar> mainbar = session_.main_bar();
+	current_max_offset_ = mainbar->get_sample_count() / (double)mainbar->get_sample_rate();
+	current_max_scale_= current_max_offset_ / w;
+
+	if (scale_ > current_max_scale_ || is_set) {
+		set_scale_offset(current_max_scale_, 0);	
+	}
 }
 
 void View::capture_state_updated(int state)
 {
 	GlobalSettings settings;
-
 	if (state == Session::Running) {
+		update_scale_offset(true);
+
 		set_time_unit(util::TimeUnit::Samples);
 
 		trigger_markers_.clear();
@@ -2016,7 +2396,7 @@ void View::capture_state_updated(int state)
 
 		// Enable sticky scrolling if the setting is enabled
 		sticky_scrolling_ = !restoring_state_ &&
-			settings.value(GlobalSettings::Key_View_StickyScrolling).toBool();
+			settings.value(GlobalSettings::Key_View_StickyScrolling, true).toBool();
 
 		// Reset all traces to segment 0
 		current_segment_ = 0;
@@ -2047,8 +2427,7 @@ void View::capture_state_updated(int state)
 			(sticky_scrolling_ || (offset_ == offset_at_acq_start_))) {
 			zoom_fit(false);  // We're stopped, so the GUI state doesn't matter
 		}
-
-		restoring_state_ = false;
+		update_signals_height();
 	}
 }
 
@@ -2081,13 +2460,6 @@ void View::on_segment_changed(int segment)
 	default:
 		break;
 	}
-}
-
-void View::on_create_marker_here()
-{
-	const QPoint p = ruler_->mapFrom(this, QPoint(context_menu_x_pos_, 0));
-
-	add_flag(ruler_->get_absolute_time_from_x_pos(p.x()));
 }
 
 void View::on_settingViewTriggerIsZeroTime_changed(const QVariant new_value)
@@ -2126,6 +2498,10 @@ void View::process_sticky_events()
 		update_layout();
 	if (sticky_events_ & TraceTreeItemVExtentsChanged) {
 		restack_all_trace_tree_items();
+		// Only update scrollbar range, preserve current vertical position.
+		// Do NOT call set_scroll_default() here — it resets the vertical
+		// position via set_v_offset(), which would jump the view to the top
+		// whenever a decode trace's visible_rows_ changes (e.g. on hover).
 		update_scroll();
 	}
 

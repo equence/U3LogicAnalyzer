@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -48,6 +50,9 @@ class Viewport : public ViewWidget, public GlobalSettingsInterface
 {
 	Q_OBJECT
 
+Q_SIGNALS:
+	void add_rule_flag(QMouseEvent *);
+
 public:
 	explicit Viewport(View &parent);
 	~Viewport();
@@ -59,7 +64,8 @@ public:
 	 *   @c shared_ptr if no item was found.
 	 */
 	shared_ptr<ViewItem> get_mouse_over_item(const QPoint &pt);
-
+	void SetMeasurePoint(QPointF q1, QPointF q2, QPointF q3);
+	
 private:
 	/**
 	 * Indicates when a view item is being hovered over.
@@ -102,7 +108,6 @@ private:
 	void wheelEvent(QWheelEvent *event);
 
 	void on_setting_changed(const QString &key, const QVariant &value);
-
 private:
 	boost::optional<pv::util::Timestamp> drag_offset_;
 	int drag_v_offset_;
@@ -111,6 +116,16 @@ private:
 	double pinch_offset0_;
 	double pinch_offset1_;
 	bool pinch_zoom_active_;
+	QPointF measure_start_, measure_mid_, measure_end_;
+	
+
+public:
+	QString width_;
+	QString period_;
+	QString freq_;
+	QString duty_cycle_;
+	QPointF bezier_start_, bezier_end_;
+	QString bezier_width_;
 };
 
 } // namespace trace

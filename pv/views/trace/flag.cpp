@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -44,6 +46,7 @@ Flag::Flag(View &view, const pv::util::Timestamp& time, const QString &text) :
 	TimeMarker(view, FillColor, time),
 	text_(text)
 {
+	time_ = time;
 }
 
 Flag::Flag(const Flag &flag) :
@@ -57,11 +60,7 @@ bool Flag::enabled() const
 	return true;
 }
 
-/**
- * Returns the text used to display this flag item. This is not necessarily the
- * name that the user has given it.
- */
-QString Flag::get_display_text() const
+QString Flag::get_text() const
 {
 	QString s;
 
@@ -77,17 +76,20 @@ QString Flag::get_display_text() const
 	return s;
 }
 
-/**
- * Returns the text of this flag item, i.e. the user-editable name.
- */
-QString Flag::get_text() const
+QString Flag::get_index_text() const
 {
-	return text_;
+	return index_text_;
 }
 
 void Flag::set_text(const QString &text)
 {
 	text_ = text;
+	view_.time_item_appearance_changed(true, false);
+}
+
+void Flag::set_index_text(const QString &text)
+{
+	index_text_ = text;
 	view_.time_item_appearance_changed(true, false);
 }
 
@@ -104,11 +106,11 @@ QRectF Flag::label_rect(const QRectF &rect) const
 		const float x = get_x();
 
 		QFontMetrics m(QApplication::font());
-		QSize text_size = m.boundingRect(get_display_text()).size();
+		QSize text_size = m.boundingRect(get_text()).size();
 
 		const QSizeF label_size(
-			text_size.width() + LabelPadding.width() * 2,
-			text_size.height() + LabelPadding.height() * 2);
+			text_size.width() + LabelPadding.width() * 2 + 8.0,
+			text_size.height() + LabelPadding.height() * 2 + 4.5);
 
 		const float height = label_size.height();
 		const float top =
@@ -177,6 +179,27 @@ void Flag::on_delete()
 void Flag::on_text_changed(const QString &text)
 {
 	set_text(text);
+}
+
+void Flag::set_time(const pv::util::Timestamp& time)
+{
+	QString newtext = pv::util::format_time_si(
+		time, pv::util::SIPrefix::none, 6);
+	set_text(newtext);
+	TimeMarker::set_time(time);
+	time_ = time;
+}
+
+void Flag::try_delete()
+{
+	if (selected()) {
+		view_.remove_flag(shared_ptr<Flag>(shared_from_this()));
+	}
+}
+
+void Flag::on_press_delete()
+{
+	try_delete();
 }
 
 } // namespace trace

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,12 +20,16 @@
  */
 
 #include "sweeptimingwidget.hpp"
-
+#include <QDebug>
 #include <cassert>
 #include <cstdlib>
 #include <vector>
-
+#include <string>
+#include <QString>
 #include <extdef.h>
+#include <QComboBox>
+#include <QAbstractItemView>
+#include <QFontMetrics>
 
 using std::abs;
 using std::vector;
@@ -40,6 +46,7 @@ SweepTimingWidget::SweepTimingWidget(const char *suffix,
 	list_(this),
 	value_type_(None)
 {
+	pData = new uint64_t[50];
 	setContentsMargins(0, 0, 0, 0);
 
 	value_.setDecimals(0);
@@ -54,15 +61,115 @@ SweepTimingWidget::SweepTimingWidget(const char *suffix,
 		this, SIGNAL(value_changed()));
 
 	setLayout(&layout_);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	layout_.setContentsMargins(0, 0, 0, 0);
-#else
 	layout_.setMargin(0);
-#endif
 	layout_.addWidget(&list_);
 	layout_.addWidget(&value_);
 
 	show_none();
+	
+
+	list_.setStyleSheet("QComboBox{combobox-popup:0;}");
+	list_.setMaxVisibleItems(10);
+}
+
+SweepTimingWidget::~SweepTimingWidget()
+{
+	if (pData != nullptr){
+		delete[] pData;
+		pData = nullptr;
+	}
+}
+
+uint64_t SweepTimingWidget::get_current_data(uint16_t index)
+{
+	if(index > 50)
+		return 0;
+	else {
+		if (pData != nullptr)
+			return pData[index];
+		else
+			return 0;
+	}
+}
+
+uint16_t SweepTimingWidget::get_current_index()
+{
+	return list_.currentIndex();
+}
+
+void SweepTimingWidget::set_current_index(uint16_t index)
+{
+	if (index > list_.count())
+		return;
+	list_.setCurrentIndex(index);
+}
+
+void SweepTimingWidget::show_list_time(const uint64_t *vals, size_t count)
+{
+	value_type_ = List;
+
+	list_.clear();
+	for (size_t i = 0; i < count; i++) {
+		pData[i] = vals[i];
+		QString str = QString::fromStdString(formatTranFer((double)(vals[i]) / 10000.00));
+		list_.addItem(str);
+	}
+	list_.setSizeAdjustPolicy(QComboBox::AdjustToContents);
+	list_.setMinimumWidth(110);
+
+	value_.hide();
+	list_.show();
+}
+
+string SweepTimingWidget::formatTranFer(double num)
+{
+	char str[512] = "";
+    string strRes;
+    int n = 0;
+    double temp = num;
+	double res;
+    if (temp < 1)
+    {
+        while(temp < 1)
+        {
+            temp = temp*10*10*10;
+            n++;
+        }
+        switch(n)
+        {
+            case 1 :
+            sprintf(str, "%.2f %s", num * 1000, "ms");
+                break;
+            case 2 :
+                sprintf(str, "%.2f %s", num * 1000000, "us");
+                break;
+            case 3 :
+                sprintf(str, "%.2f %s", num * 1000000, "ns");
+                break;
+        }
+        return str;
+    }
+    else
+    {
+        if (temp < 60)
+        {
+            sprintf(str, "%lld s", (uint64_t)temp);
+            return str;
+        }
+        else if (temp < 3600)
+        {
+			res = temp / 60.0;
+            sprintf(str, "%.2f mins", res);
+            return str;
+        }
+        else if (temp >= 3600)
+        {
+			res = temp / 3600.0;
+            sprintf(str, "%.2f hours", res);
+            return str;
+        } 
+    }
+	return str;
 }
 
 void SweepTimingWidget::allow_user_entered_values(bool value)
@@ -98,10 +205,14 @@ void SweepTimingWidget::show_list(const uint64_t *vals, size_t count)
 
 	list_.clear();
 	for (size_t i = 0; i < count; i++) {
+		pData[i] = vals[i];
 		char *const s = sr_si_string_u64(vals[i], suffix_);
-		list_.addItem(QString::fromUtf8(s), QVariant::fromValue(vals[i]));
+		QString text = QString::fromUtf8(s);
+		list_.addItem(text, QVariant::fromValue(vals[i]));
 		g_free(s);
 	}
+	list_.setSizeAdjustPolicy(QComboBox::AdjustToContents);
+	list_.setMinimumWidth(125);
 
 	value_.hide();
 	list_.show();
@@ -110,7 +221,7 @@ void SweepTimingWidget::show_list(const uint64_t *vals, size_t count)
 void SweepTimingWidget::show_125_list(uint64_t min, uint64_t max)
 {
 	assert(max > min);
-
+	uint16_t num = 0;
 	// Create a 1-2-5-10 list of entries.
 	const unsigned int FineScales[] = {1, 2, 5};
 	uint64_t value, decade;
@@ -133,6 +244,9 @@ void SweepTimingWidget::show_125_list(uint64_t min, uint64_t max)
 
 	while ((value = FineScales[fine] * decade) < max) {
 		values.push_back(value);
+		++num;
+		if (num == 49)
+			break;
 		if (++fine >= countof(FineScales))
 			fine = 0, decade *= 10;
 	}
@@ -141,9 +255,17 @@ void SweepTimingWidget::show_125_list(uint64_t min, uint64_t max)
 	values.push_back(max);
 
 	// Make a C array, and give it to the sweep timing widget
-	uint64_t *const values_array = new uint64_t[values.size()];
+	uint64_t * values_array = new uint64_t[values.size()];
 	copy(values.begin(), values.end(), values_array);
-	show_list(values_array, values.size());
+	QString str = suffix_;
+	if (str == "s")
+	{
+		show_list_time(values_array, values.size());
+	}
+	else
+	{
+		show_list(values_array, values.size());
+	}
 	delete[] values_array;
 }
 
@@ -170,6 +292,22 @@ uint64_t SweepTimingWidget::value() const
 		assert(false);
 		return 0;
 	}
+}
+
+void SweepTimingWidget::set_time_value(uint64_t value, uint64_t sampleRate)
+{
+	int best_match = list_.count() - 1;
+	bool is_best_match = false;
+	for (int i = 0; i < list_.count(); i++) {
+		if (((double)value / (double)sampleRate) * 10000 == pData[i]){
+			best_match = i;
+			is_best_match = true;
+			break;
+		}
+	}
+	if (is_best_match == false)
+		best_match = 0;
+	list_.setCurrentIndex(best_match);
 }
 
 void SweepTimingWidget::set_value(uint64_t value)

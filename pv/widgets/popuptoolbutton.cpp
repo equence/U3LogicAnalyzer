@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -46,11 +48,12 @@ void PopupToolButton::on_clicked(bool)
 {
 	if (!popup_)
 		return;
-
+	
 	const QRect r = rect();
 	popup_->set_position(mapToGlobal(QPoint((r.left() + r.right()) / 2,
 		((r.top() + r.bottom() * 3) / 4))), Popup::Bottom);
 	popup_->show();
+
 }
 
 }  // namespace widgets

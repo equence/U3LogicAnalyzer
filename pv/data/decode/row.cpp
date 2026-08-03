@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,7 +20,6 @@
  */
 
 #include <cassert>
-#include <QDebug>
 
 #include "decoder.hpp"
 #include "row.hpp"
@@ -150,31 +151,17 @@ const QColor Row::color() const
 
 const QColor Row::get_class_color(uint32_t ann_class_id) const
 {
-	try {
-		return ann_class_color_.at(ann_class_id);
-	} catch (std::out_of_range &e) {
-		qWarning() << "Warning: annotation type" << decoder_->get_ann_class_by_id(ann_class_id)->name
-			<< "(" << ann_class_id << ")" << "not assigned to any annotation row!";
-		return QColor(20, 20, 20);
-	}
+	return ann_class_color_.at(ann_class_id);
 }
 
 const QColor Row::get_bright_class_color(uint32_t ann_class_id) const
 {
-	try {
-		return ann_bright_class_color_.at(ann_class_id);
-	} catch (std::out_of_range &e) {
-		return QColor(20, 20, 20);
-	}
+	return ann_bright_class_color_.at(ann_class_id);
 }
 
 const QColor Row::get_dark_class_color(uint32_t ann_class_id) const
 {
-	try {
-		return ann_dark_class_color_.at(ann_class_id);
-	} catch (std::out_of_range &e) {
-		return QColor(20, 20, 20);
-	}
+	return ann_dark_class_color_.at(ann_class_id);
 }
 
 bool Row::has_hidden_classes() const

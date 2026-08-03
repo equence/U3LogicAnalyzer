@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2017 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -72,7 +74,6 @@ public:
 	static const QString Key_View_DefaultDivHeight;
 	static const QString Key_View_DefaultLogicHeight;
 	static const QString Key_View_ShowHoverMarker;
-	static const QString Key_View_KeepRulerItemSelected;
 	static const QString Key_View_SnapDistance;
 	static const QString Key_View_CursorFillColor;
 	static const QString Key_View_CursorShowInterval;
@@ -83,6 +84,8 @@ public:
 	static const QString Key_Dec_AlwaysShowAllRows;
 	static const QString Key_Log_BufferSize;
 	static const QString Key_Log_NotifyOfStacktrace;
+	
+	static const QString Key_ThresholdLevel;
 
 	enum ConvThrDispMode {
 		ConvThrDispMode_None = 0,

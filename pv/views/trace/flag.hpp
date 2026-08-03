@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,20 +65,20 @@ public:
 	virtual bool enabled() const override;
 
 	/**
-	 * Gets the current text to show in the marker - this may be dynamic.
-	 */
-	virtual QString get_display_text() const override;
-
-	/**
-	 * Gets the default text used to show the marker - e.g. the user-editable
-	 * name.
+	 * Gets the text to show in the marker.
 	 */
 	virtual QString get_text() const override;
+
+	virtual QString get_index_text() const override;
 
 	/**
 	 * Sets the text to show in the marker.
 	 */
 	virtual void set_text(const QString &text) override;
+
+	virtual void set_index_text(const QString &text) override;
+
+	virtual void set_time(const pv::util::Timestamp& time) override;
 
 	virtual pv::widgets::Popup* create_popup(QWidget *parent) override;
 
@@ -86,13 +88,23 @@ public:
 
 	QRectF label_rect(const QRectF &rect) const override;
 
+	void try_delete();
+
 private Q_SLOTS:
 	void on_delete();
 
 	void on_text_changed(const QString &text);
 
+public Q_SLOTS:
+
+	void on_press_delete();
+
 private:
 	QString text_;
+	QString index_text_;
+
+public:
+	pv::util::Timestamp time_;
 };
 
 } // namespace trace

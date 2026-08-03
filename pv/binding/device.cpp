@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -107,7 +109,7 @@ Device::Device(shared_ptr<sigrok::Configurable> configurable) :
 				tr("No Limit"));
 			break;
 
-		case SR_CONF_PATTERN_MODE:
+		// case SR_CONF_PATTERN_MODE:
 		case SR_CONF_BUFFERSIZE:
 		case SR_CONF_TRIGGER_SOURCE:
 		case SR_CONF_TRIGGER_SLOPE:

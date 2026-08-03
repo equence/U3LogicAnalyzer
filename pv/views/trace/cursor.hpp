@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -59,6 +61,8 @@ public:
 	 * Gets the text to show in the marker.
 	 */
 	virtual QString get_text() const override;
+
+	virtual QString get_index_text() const override;
 
 	/**
 	 * Gets the marker label rectangle.

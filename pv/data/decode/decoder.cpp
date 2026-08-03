@@ -86,6 +86,10 @@ Decoder::Decoder(const srd_decoder *const dec, uint8_t stack_level) :
 	}
 
 	// Query the annotation rows and reference them by the classes that use them
+	uint32_t row_count = 0;
+	for (const GSList *rl = srd_decoder_->annotation_rows; rl; rl = rl->next)
+		row_count++;
+
 	i = 0;
 	for (const GSList *rl = srd_decoder_->annotation_rows; rl; rl = rl->next) {
 		const srd_decoder_annotation_row *const srd_row = (srd_decoder_annotation_row *)rl->data;
@@ -241,6 +245,11 @@ srd_decoder_inst* Decoder::create_decoder_inst(srd_session *session)
 	srd_inst_initial_pins_set_all(decoder_inst_, init_pin_states);
 	g_array_free(init_pin_states, true);
 
+	return decoder_inst_;
+}
+
+srd_decoder_inst* Decoder::get_decoder_inst() const
+{
 	return decoder_inst_;
 }
 

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,6 +38,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QLabel>
+#include <QMap>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
@@ -161,8 +164,8 @@ DecodeTrace::DecodeTrace(pv::Session &session,
 	// e.g. two hex characters
 	min_useful_label_width_ = util::text_width(m, "XX");
 
-	default_row_height_ = (ViewItemPaintParams::text_height() * 6) / 4;
-	annotation_height_ = (ViewItemPaintParams::text_height() * 5) / 4;
+	default_row_height_ = ViewItemPaintParams::text_height();
+	annotation_height_ = ViewItemPaintParams::text_height();
 
 	// For the base color, we want to start at a very different color for
 	// every decoder stack, so multiply the index with a number that is
@@ -186,16 +189,7 @@ DecodeTrace::DecodeTrace(pv::Session &session,
 		this, SLOT(on_decode_finished()));
 	connect(decode_signal_.get(), SIGNAL(channels_updated()),
 		this, SLOT(on_channels_updated()));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	connect(&delete_mapper_, SIGNAL(mappedInt(int)),
-		this, SLOT(on_delete_decoder(int)));
-	connect(&show_hide_mapper_, SIGNAL(mappedInt(int)),
-		this, SLOT(on_show_hide_decoder(int)));
-	connect(&row_show_hide_mapper_, SIGNAL(mappedInt(int)),
-		this, SLOT(on_show_hide_row(int)));
-	connect(&class_show_hide_mapper_, SIGNAL(mappedObject(QObject*)),
-		this, SLOT(on_show_hide_class(QObject*)));
-#else
+
 	connect(&delete_mapper_, SIGNAL(mapped(int)),
 		this, SLOT(on_delete_decoder(int)));
 	connect(&show_hide_mapper_, SIGNAL(mapped(int)),
@@ -204,7 +198,6 @@ DecodeTrace::DecodeTrace(pv::Session &session,
 		this, SLOT(on_show_hide_row(int)));
 	connect(&class_show_hide_mapper_, SIGNAL(mapped(QWidget*)),
 		this, SLOT(on_show_hide_class(QWidget*)));
-#endif
 
 	connect(&delayed_trace_updater_, SIGNAL(timeout()),
 		this, SLOT(on_delayed_trace_update()));
@@ -217,6 +210,10 @@ DecodeTrace::DecodeTrace(pv::Session &session,
 
 	connect(&delayed_hidden_row_hider_, SIGNAL(timeout()),
 		this, SLOT(on_hide_hidden_rows()));
+
+	connect(decode_signal_.get(), SIGNAL(show_message(QString)),
+		this, SLOT(on_show_message(QString)));
+		
 	delayed_hidden_row_hider_.setSingleShot(true);
 	delayed_hidden_row_hider_.setInterval(HiddenRowHideDelay);
 
@@ -274,6 +271,7 @@ pair<int, int> DecodeTrace::v_extents() const
 	return make_pair(-default_row_height_, height);
 }
 
+
 void DecodeTrace::paint_back(QPainter &p, ViewItemPaintParams &pp)
 {
 	Trace::paint_back(p, pp);
@@ -291,7 +289,9 @@ void DecodeTrace::paint_mid(QPainter &p, ViewItemPaintParams &pp)
 
 	// Set default pen to allow for text width calculation
 	p.setPen(Qt::black);
-
+	// double samplerate = 62.5 * UINT64_C(1000000000);
+	double samplerate = session_.get_samplerate();
+	const double samples_per_pixel = samplerate * pp.scale();
 	pair<uint64_t, uint64_t> sample_range = get_view_sample_range(pp.left(), pp.right());
 
 	// Just because the view says we see a certain sample range it
@@ -324,7 +324,7 @@ void DecodeTrace::paint_mid(QPainter &p, ViewItemPaintParams &pp)
 		if (!r.currently_visible) {
 			size_t ann_count = decode_signal_->get_annotation_count(r.decode_row, current_segment_);
 			r.currently_visible = ((always_show_all_rows_ || r.has_hidden_classes) &&
-				(ann_count > 0)) || r.expanded;
+				(ann_count > 0) && (samples_per_pixel < 0.25)) || r.expanded;
 		}
 
 		if (r.currently_visible) {
@@ -417,7 +417,7 @@ void DecodeTrace::update_stack_button()
 	if (!stack.empty()) {
 		const srd_decoder* d = stack.back()->get_srd_decoder();
 
-		if (d->outputs) {
+		if (d && d->outputs) {
 			pv::widgets::DecoderMenu *const decoder_menu =
 				new pv::widgets::DecoderMenu(stack_button_, (const char*)(d->outputs->data));
 			connect(decoder_menu, SIGNAL(decoder_selected(srd_decoder*)),
@@ -443,6 +443,12 @@ void DecodeTrace::populate_popup_form(QWidget *parent, QFormLayout *form)
 	// Add the standard options
 	Trace::populate_popup_form(parent, form);
 
+	// Add the decoder options
+	create_decoder_options(parent, form);
+}
+
+void DecodeTrace::create_decoder_options(QWidget *parent, QFormLayout *form)
+{
 	// Add the decoder options
 	bindings_.clear();
 	channel_id_map_.clear();
@@ -475,6 +481,94 @@ void DecodeTrace::populate_popup_form(QWidget *parent, QFormLayout *form)
 	QHBoxLayout *stack_button_box = new QHBoxLayout;
 	stack_button_box->addWidget(stack_button_, 0, Qt::AlignRight);
 	form->addRow(stack_button_box);
+
+	// const View *const view = owner_->view();
+	// QLabel *start_label = new QLabel(tr("解码器起始位置："), parent);
+	// start_position_combobox_ = new QComboBox(parent);
+
+	// // 添加“解码器结束位置”行
+	// QLabel *end_label = new QLabel(tr("解码器结束位置："), parent);
+	// end_position_combobox_ = new QComboBox(parent);
+	// start_position_combobox_->addItem("start");
+	// end_position_combobox_->addItem("end");
+	// flag_position_.clear();
+	// flag_position_.push_back(0);
+	// for (auto ptr : view->flags()) {
+	// 	flag_position_.push_back((uint64_t)((double)ptr->time_ * session_.get_samplerate()));
+	// 	QString str = tr("光标:");
+	// 	str += ptr->get_index_text();
+	// 	start_position_combobox_->addItem(str);
+	// 	end_position_combobox_->addItem(str);
+	// }
+	// form->addRow(start_label, start_position_combobox_);
+	// form->addRow(end_label, end_position_combobox_);
+	// for (int i = 0; i < start_position_combobox_->count(); ++i) {
+	// 	QString text = start_position_combobox_->itemText(i);
+	// 	if (text == start_combobox_current_text_) {
+	// 		start_position_combobox_->setCurrentIndex(i);
+	// 		base_->start_decode_pos_ = flag_position_[i];
+	// 		break;
+	// 	}
+	// 	start_position_combobox_->setCurrentIndex(0);
+	// 	base_->start_decode_pos_ = 0;
+	// }
+	// for (int i = 0; i < end_position_combobox_->count(); ++i) {
+	// 	QString text = end_position_combobox_->itemText(i);
+	// 	if (text == end_combobox_current_text_) {
+	// 		end_position_combobox_->setCurrentIndex(i);
+	// 		base_->end_decode_pos_ = flag_position_[i];
+	// 		break;
+	// 	}
+	// 	end_position_combobox_->setCurrentIndex(0);
+	// 	base_->end_decode_pos_ = 0;
+	// }
+	// connect(start_position_combobox_,
+    //     SIGNAL(currentIndexChanged(int)),
+    //     this,
+    //     SLOT(on_start_position_changed(int)));
+	// connect(end_position_combobox_,
+    //     SIGNAL(currentIndexChanged(int)),
+    //     this,
+    //     SLOT(on_end_position_changed(int)));
+	
+	// QPushButton *confirmButton = new QPushButton("确认", parent);
+	// form->addRow("", confirmButton);  // 第一个参数是空字符串 label
+	// connect(confirmButton, SIGNAL(clicked()), this, SLOT(on_comfirm_button_clicked()));
+}
+
+void DecodeTrace::on_comfirm_button_clicked()
+{
+	for (auto& pair : channel_id_map_) {
+		QComboBox* comboBox = pair.first;  // 取出 QComboBox 指针
+		int currentIndex = comboBox->currentIndex();  // 获取当前选中索引
+		// Determine signal that was selected
+		shared_ptr<data::SignalBase> signal =
+			comboBox->itemData(currentIndex).value<shared_ptr<data::SignalBase>>();
+		uint16_t channelId = channel_id_map_.at(comboBox);
+		decode_signal_->assign_signal(channelId, signal);
+		g_usleep(1000);	
+	}
+	close_popup();
+}
+
+void DecodeTrace::on_start_position_changed(int index)
+{
+	if (index < flag_position_.size()) {
+		base_->start_decode_pos_ = flag_position_[index];
+	} else {
+		base_->start_decode_pos_ = 0;
+	}
+	start_combobox_current_text_ = start_position_combobox_->itemText(index);
+}
+
+void DecodeTrace::on_end_position_changed(int index)
+{
+	if (index < flag_position_.size()) {
+		base_->end_decode_pos_ = flag_position_[index];
+	} else {
+		base_->end_decode_pos_ = 0;
+	}
+	end_combobox_current_text_ = end_position_combobox_->itemText(index);
 }
 
 QMenu* DecodeTrace::create_header_context_menu(QWidget *parent)
@@ -616,9 +710,10 @@ void DecodeTrace::hover_point_changed(const QPoint &hp)
 	DecodeTraceRow* hover_row = get_row_at_point(hp);
 
 	// Row expansion marker handling
-	for (DecodeTraceRow& r : rows_)
+	for (DecodeTraceRow& r : rows_){
 		r.expand_marker_highlighted = false;
-
+	}
+		
 	if (hover_row) {
 		const pair<int, int> extents = v_extents();
 		const int trace_top = get_visual_y() + extents.first;
@@ -666,6 +761,15 @@ void DecodeTrace::hover_point_changed(const QPoint &hp)
 		QToolTip::hideText();
 }
 
+void DecodeTrace::on_signal_height_change(int height)
+{
+	default_row_height_ = min(max(height, ViewItemPaintParams::text_height()) ,50);
+	if (owner_){
+		owner_->extents_changed(false, true);
+		owner_->row_item_appearance_changed(false, true);
+	}
+}
+
 void DecodeTrace::mouse_left_press_event(const QMouseEvent* event)
 {
 	// Update container widths which depend on the scrollarea's current width
@@ -677,19 +781,10 @@ void DecodeTrace::mouse_left_press_event(const QMouseEvent* event)
 			continue;
 
 		unsigned int y = get_row_y(&r);
-		bool need_anim = true;
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-		need_anim &= event->position().x() > 0;
-		need_anim &= event->position().x() <= (int)(ArrowSize + 3 + r.title_width);
-		need_anim &= event->position().y() > (int)(y - (default_row_height_ / 2));
-		need_anim &= event->position().y() <= (int)(y + (default_row_height_ / 2));
-#else
-		need_anim &= event->x() > 0;
-		need_anim &= event->x() <= (int)(ArrowSize + 3 + r.title_width);
-		need_anim &= event->y() > (int)(y - (default_row_height_ / 2));
-		need_anim &= event->y() <= (int)(y + (default_row_height_ / 2));
-#endif
-		if (need_anim) {
+		if ((event->x() > 0) && (event->x() <= (int)(ArrowSize + 3 + r.title_width)) &&
+			(event->y() > (int)(y - (default_row_height_ / 2))) &&
+			(event->y() <= (int)(y + (default_row_height_ / 2)))) {
+
 			if (r.expanded) {
 				r.collapsing = true;
 				r.expanded = false;
@@ -703,7 +798,10 @@ void DecodeTrace::mouse_left_press_event(const QMouseEvent* event)
 				forceUpdate(r.container);
 
 				r.container->setVisible(true);
-				r.expanded_height = 2 * default_row_height_ + r.container->sizeHint().height();
+				// 限制注解行最大高度，防止无限累加
+				const int max_expand = default_row_height_ * 6;
+				int hint_h = r.container->sizeHint().height();
+				r.expanded_height = default_row_height_ + min(hint_h, max_expand);
 			}
 
 			r.animation_step = 0;
@@ -1260,6 +1358,15 @@ void DecodeTrace::export_annotations(deque<const Annotation*>& annotations) cons
 	msg.exec();
 }
 
+void DecodeTrace::on_show_message(QString err)
+{
+	QMessageBox msg(owner_->view());
+	msg.setText(tr("Error") + "\n\n" + err);
+	msg.setStandardButtons(QMessageBox::Ok);
+	msg.setIcon(QMessageBox::Warning);
+	msg.exec();
+}
+
 void DecodeTrace::initialize_row_widgets(DecodeTraceRow* r, unsigned int row_id)
 {
 	// Set colors and fixed widths
@@ -1268,19 +1375,6 @@ void DecodeTrace::initialize_row_widgets(DecodeTraceRow* r, unsigned int row_id)
 	QPalette header_palette = owner_->view()->palette();
 	QPalette selector_palette = owner_->view()->palette();
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
-	if (GlobalSettings::current_theme_is_dark()) {
-		header_palette.setColor(QPalette::Window,
-			QColor(255, 255, 255, ExpansionAreaHeaderAlpha));
-		selector_palette.setColor(QPalette::Window,
-			QColor(255, 255, 255, ExpansionAreaAlpha));
-	} else {
-		header_palette.setColor(QPalette::Window,
-			QColor(0, 0, 0, ExpansionAreaHeaderAlpha));
-		selector_palette.setColor(QPalette::Window,
-			QColor(0, 0, 0, ExpansionAreaAlpha));
-	}
-#else
 	if (GlobalSettings::current_theme_is_dark()) {
 		header_palette.setColor(QPalette::Background,
 			QColor(255, 255, 255, ExpansionAreaHeaderAlpha));
@@ -1292,7 +1386,6 @@ void DecodeTrace::initialize_row_widgets(DecodeTraceRow* r, unsigned int row_id)
 		selector_palette.setColor(QPalette::Background,
 			QColor(0, 0, 0, ExpansionAreaAlpha));
 	}
-#endif
 
 	const int w = m.boundingRect(r->decode_row->title()).width() + RowTitleMargin;
 	r->title_width = w;
@@ -1310,9 +1403,9 @@ void DecodeTrace::initialize_row_widgets(DecodeTraceRow* r, unsigned int row_id)
 	vlayout->setSpacing(0);
 	QHBoxLayout* header_container_layout = new QHBoxLayout();
 	r->header_container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-	r->header_container->setMinimumSize(0, default_row_height_);
+	r->header_container->setMinimumSize(0, default_row_height_ + 10);
 	r->header_container->setLayout(header_container_layout);
-	r->header_container->layout()->setContentsMargins(10, 2, 10, 2);
+	r->header_container->layout()->setContentsMargins(10, 1, 10, 1);
 
 	r->header_container->setAutoFillBackground(true);
 	r->header_container->setPalette(header_palette);
@@ -1481,8 +1574,12 @@ void DecodeTrace::set_row_collapsed(DecodeTraceRow* r)
 void DecodeTrace::update_expanded_rows()
 {
 	for (DecodeTraceRow& r : rows_) {
-		if (r.expanding || r.expanded)
-			r.expanded_height = 2 * default_row_height_ + r.container->sizeHint().height();
+		if (r.expanding || r.expanded) {
+			// 限制注解行最大高度，防止无限累加
+			const int max_expand = default_row_height_ * 6;
+			int hint_h = r.container->sizeHint().height();
+			r.expanded_height = default_row_height_ + min(hint_h, max_expand);
+		}
 
 		if (r.expanded)
 			r.height = r.expanded_height;
@@ -1600,7 +1697,21 @@ void DecodeTrace::on_stack_decoder(srd_decoder *decoder)
 
 void DecodeTrace::on_delete_decoder(int index)
 {
+	// Save original signal names before removing decoder
+	QMap<shared_ptr<data::SignalBase>, QString> saved_names;
+	const auto channels = decode_signal_->get_channels();
+	for (const auto& ch : channels) {
+		if (ch.assigned_signal && !ch.assigned_signal->internal_name().isEmpty())
+			saved_names[std::const_pointer_cast<data::SignalBase>(ch.assigned_signal)] =
+				ch.assigned_signal->internal_name();
+	}
+
 	decode_signal_->remove_decoder(index);
+
+	// Restore original signal names
+	for (auto it = saved_names.begin(); it != saved_names.end(); ++it)
+		it.key()->set_name(it.value());
+
 	update_rows();
 
 	owner_->extents_changed(false, true);
@@ -1619,6 +1730,9 @@ void DecodeTrace::on_show_hide_decoder(int index)
 		owner_->extents_changed(false, true);
 
 	owner_->row_item_appearance_changed(false, true);
+	if (owner_->view()){
+		owner_->view()->update_signals_height();
+	}
 }
 
 void DecodeTrace::on_show_hide_row(int row_id)
@@ -1635,11 +1749,7 @@ void DecodeTrace::on_show_hide_row(int row_id)
 	owner_->row_item_appearance_changed(false, true);
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-void DecodeTrace::on_show_hide_class(QObject* sender)
-#else
 void DecodeTrace::on_show_hide_class(QWidget* sender)
-#endif
 {
 	void* ann_class_ptr = sender->property("ann_class_ptr").value<void*>();
 	assert(ann_class_ptr);

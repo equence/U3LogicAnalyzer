@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -95,20 +97,18 @@ public:
 	QRectF hit_box_rect(const ViewItemPaintParams &pp) const override;
 
 	/**
-	 * Gets the current text to show in the marker - this may be dynamic.
-	 */
-	virtual QString get_display_text() const;
-
-	/**
-	 * Gets the default text used to show the marker - e.g. the user-editable
-	 * name.
+	 * Gets the text to show in the marker.
 	 */
 	virtual QString get_text() const = 0;
+
+	virtual QString get_index_text() const = 0;
 
 	/**
 	 * Sets the text to show in the marker.
 	 */
 	virtual void set_text(const QString &text);
+
+	virtual void set_index_text(const QString &text);
 
 	/**
 	 * Paints the marker's label to the ruler.
@@ -128,8 +128,6 @@ public:
 	virtual pv::widgets::Popup* create_popup(QWidget *parent) override;
 
 private Q_SLOTS:
-	void on_popup_closed();
-
 	void on_value_changed(const pv::util::Timestamp& value);
 
 protected:

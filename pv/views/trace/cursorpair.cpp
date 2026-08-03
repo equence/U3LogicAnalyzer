@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +25,7 @@
 #include <QColor>
 #include <QMenu>
 #include <QToolTip>
-
+#include <QDebug>
 #include "cursorpair.hpp"
 
 #include "pv/globalsettings.hpp"
@@ -202,13 +204,11 @@ void CursorPair::paint_label(QPainter &p, const QRect &rect, bool hover)
 
 	text_size_ = p.boundingRect(QRectF(), 0, text).size();
 
-	/* Currently, selecting the middle section between two cursors doesn't do
-	 * anything, so don't highlight it when selected
 	if (selected()) {
 		p.setBrush(Qt::transparent);
 		p.setPen(highlight_pen());
 		p.drawRoundedRect(delta_rect, radius, radius);
-	} */
+	}
 
 	p.setBrush(hover ? Cursor::FillColor.lighter() : Cursor::FillColor);
 	p.setPen(Cursor::FillColor.darker());
@@ -259,8 +259,9 @@ QString CursorPair::format_string(int max_width, std::function<double(const QStr
 		time_precision--;
 
 		s = format_string_sub(time_precision, freq_precision);
-		if (query_size(s) <= max_width)
+		if (query_size(s) <= max_width){
 			return s;
+		}
 	}
 
 	// Gradually reduce both precisions down to zero
@@ -269,15 +270,17 @@ QString CursorPair::format_string(int max_width, std::function<double(const QStr
 		freq_precision--;
 
 		s = format_string_sub(time_precision, freq_precision);
-		if (query_size(s) <= max_width)
+		if (query_size(s) <= max_width){
 			return s;
+		}		
 	}
 
 	// Try no trailing digits and drop the unit to at least display something
 	s = format_string_sub(0, 0, false);
 
-	if (query_size(s) <= max_width)
+	if (query_size(s) <= max_width){
 		return s;
+	}
 
 	// Give up
 	return "...";

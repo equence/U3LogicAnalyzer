@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2019 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -61,6 +63,8 @@ public:
 
 	virtual ViewType get_type() const;
 
+	virtual QSize sizeHint() const;
+
 	/**
 	 * Resets the view to its default state after construction. It does however
 	 * not reset the signal bases or any other connections with the session.
@@ -96,6 +100,8 @@ private Q_SLOTS:
 		MetadataValueType value_type);
 
 	virtual void perform_delayed_view_update();
+
+	virtual void capture_state_updated(int state);
 
 private:
 	QWidget* parent_;

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -61,7 +63,6 @@ public:
 	 * the area to overlap the viewport.
 	 */
 	QSize extended_size_hint() const;
-
 private:
 	/**
 	 * Gets the row items.
@@ -75,7 +76,7 @@ private:
 	 *   @c shared_ptr if no item was found.
 	 */
 	shared_ptr<ViewItem> get_mouse_over_item(const QPoint &pt);
-
+	
 private:
 	void paintEvent(QPaintEvent *event);
 

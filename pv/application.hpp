@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2014 Martin Ling <martin-sigrok@earth.li>
- *
+ * Copyright (C) 2026 Q2H2
+ * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -25,7 +27,7 @@
 #include <QApplication>
 #include <QStringList>
 #include <QTranslator>
-
+#include <QProcess>
 #include <libsigrokcxx/libsigrokcxx.hpp>
 
 #include "devicemanager.hpp"
@@ -59,6 +61,9 @@ public:
 	vector< pair<QString, QString> > get_output_format_list() const;
 	vector< pair<QString, QString> > get_pd_list() const;
 
+	void set_hardware_version(uint64_t hardware_version);
+	void renew_version_info();
+
 private:
 	bool notify(QObject *receiver, QEvent *event);
 
@@ -69,8 +74,9 @@ private:
 	vector< pair<QString, QString> > input_format_list_;
 	vector< pair<QString, QString> > output_format_list_;
 	vector< pair<QString, QString> > pd_list_;
-
+	QProcess * UpdateFwVersion_;
 	QTranslator app_translator_, qt_translator_, qtbase_translator_;
+	uint64_t hd_version_ = 0;
 };
 
 #endif // PULSEVIEW_PV_APPLICATION_HPP

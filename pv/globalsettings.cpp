@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2017 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -43,9 +45,9 @@ using std::vector;
 namespace pv {
 
 const vector< pair<QString, QString> > Themes {
-	{"None" , ""},
-	{"QDarkStyleSheet", ":/themes/qdarkstyle/style.qss"},
-	{"DarkStyle", ":/themes/darkstyle/darkstyle.qss"}
+	{"BrightStyleSheet" , ""},
+	{"QDarkStyleSheet", ":/themes/qdarkstyle/style.qss"}
+	// {"DarkStyle", ":/themes/darkstyle/darkstyle.qss"}
 };
 
 const QString GlobalSettings::Key_General_Language = "General_Language";
@@ -67,7 +69,6 @@ const QString GlobalSettings::Key_View_ConversionThresholdDispMode = "View_Conve
 const QString GlobalSettings::Key_View_DefaultDivHeight = "View_DefaultDivHeight";
 const QString GlobalSettings::Key_View_DefaultLogicHeight = "View_DefaultLogicHeight";
 const QString GlobalSettings::Key_View_ShowHoverMarker = "View_ShowHoverMarker";
-const QString GlobalSettings::Key_View_KeepRulerItemSelected = "View_KeepRulerItemSelected";
 const QString GlobalSettings::Key_View_SnapDistance = "View_SnapDistance";
 const QString GlobalSettings::Key_View_CursorFillColor = "View_CursorFillColor";
 const QString GlobalSettings::Key_View_CursorShowFrequency = "View_CursorShowFrequency";
@@ -78,7 +79,7 @@ const QString GlobalSettings::Key_Dec_ExportFormat = "Dec_ExportFormat";
 const QString GlobalSettings::Key_Dec_AlwaysShowAllRows = "Dec_AlwaysShowAllRows";
 const QString GlobalSettings::Key_Log_BufferSize = "Log_BufferSize";
 const QString GlobalSettings::Key_Log_NotifyOfStacktrace = "Log_NotifyOfStacktrace";
-
+const QString GlobalSettings::Key_ThresholdLevel = "ThresholdLevel";
 vector<GlobalSettingsInterface*> GlobalSettings::callbacks_;
 bool GlobalSettings::tracking_ = false;
 bool GlobalSettings::is_dark_theme_ = false;
@@ -104,17 +105,14 @@ void GlobalSettings::save_internal_defaults()
 void GlobalSettings::set_defaults_where_needed()
 {
 	if (!contains(Key_General_Language)) {
-		// Determine and set default UI language
-		QString language = QLocale().uiLanguages().first();  // May return e.g. en-Latn-US  // clazy:exclude=detaching-temporary
-		language = language.split("-").first();
-
-		setValue(Key_General_Language, language);
+		// Default to Chinese
+		setValue(Key_General_Language, "zh_cn");
 		apply_language();
 	}
 
 	// Use no theme by default
 	if (!contains(Key_General_Theme))
-		setValue(Key_General_Theme, 0);
+		setValue(Key_General_Theme, 1);
 	if (!contains(Key_General_Style))
 		setValue(Key_General_Style, "");
 
@@ -136,28 +134,25 @@ void GlobalSettings::set_defaults_where_needed()
 
 	// Enable showing sampling points by default
 	if (!contains(Key_View_ShowSamplingPoints))
-		setValue(Key_View_ShowSamplingPoints, true);
+		setValue(Key_View_ShowSamplingPoints, false);
 
 	// Enable filling logic signal high areas by default
 	if (!contains(Key_View_FillSignalHighAreas))
-		setValue(Key_View_FillSignalHighAreas, true);
+		setValue(Key_View_FillSignalHighAreas, false);
 
 	if (!contains(Key_View_DefaultDivHeight))
 		setValue(Key_View_DefaultDivHeight,
 		3 * QFontMetrics(QApplication::font()).height());
 
 	if (!contains(Key_View_DefaultLogicHeight))
-		setValue(Key_View_DefaultLogicHeight,
-		2 * QFontMetrics(QApplication::font()).height());
+		setValue(Key_View_DefaultLogicHeight, 20);
 
 	if (!contains(Key_View_ShowHoverMarker))
-		setValue(Key_View_ShowHoverMarker, true);
+		setValue(Key_View_ShowHoverMarker, false);
 
-	if (!contains(Key_View_KeepRulerItemSelected))
-		setValue(Key_View_KeepRulerItemSelected, false);
-
-	if (!contains(Key_View_SnapDistance))
-		setValue(Key_View_SnapDistance, 15);
+	// if (!contains(Key_View_SnapDistance))
+	// 	setValue(Key_View_SnapDistance, 1000);
+	setValue(Key_View_SnapDistance, 4000);
 
 	if (!contains(Key_View_CursorShowInterval))
 		setValue(Key_View_CursorShowInterval, true);
@@ -179,26 +174,33 @@ void GlobalSettings::set_defaults_where_needed()
 		setValue(Key_Log_NotifyOfStacktrace, true);
 
 	// Default theme is bright, so use its color scheme if undefined
-	if (!contains(Key_View_CursorFillColor))
-		set_bright_theme_default_colors();
+	if (!contains(Key_View_CursorFillColor)){
+		if (value(Key_General_Theme).toInt() == 1)
+			set_dark_theme_default_colors();
+		else
+			set_bright_theme_default_colors();
+	}
+	if (!contains(Key_ThresholdLevel))
+		setValue(Key_ThresholdLevel, 2.3);
+
+	setValue(Key_View_ShowSamplingPoints, false);   //force 
+	setValue(Key_View_ShowHoverMarker, false);      //force 
 }
 
 void GlobalSettings::set_bright_theme_default_colors()
 {
 	setValue(Key_View_FillSignalHighAreaColor,
 		QColor(0, 0, 0, 5 * 256 / 100).rgba());
-
 	setValue(Key_View_CursorFillColor,
-		QColor(220, 231, 243).rgba());
+		QColor(220, 231, 243).rgba());	
 }
 
 void GlobalSettings::set_dark_theme_default_colors()
 {
 	setValue(Key_View_FillSignalHighAreaColor,
-		QColor(188, 188, 188, 9 * 256 / 100).rgba());
-
+		QColor(0, 0, 0, 5 * 256 / 100).rgba());
 	setValue(Key_View_CursorFillColor,
-		QColor(60, 60, 60).rgba());
+		QColor(98, 98, 49).rgba());
 }
 
 bool GlobalSettings::current_theme_is_dark()
@@ -227,17 +229,17 @@ void GlobalSettings::apply_theme()
 		qApp->setStyle(style);
 
 	is_dark_theme_ = false;
-
-	if (theme_name.compare("QDarkStyleSheet") == 0) {
+	if (value(Key_General_Theme).toInt() == 1) {
 		QPalette dark_palette;
-		dark_palette.setColor(QPalette::Window, QColor(53, 53, 53));
+		// dark_palette.setColor(QPalette::Window, QColor(53, 53, 53));
+		dark_palette.setColor(QPalette::Window, QColor(0x26, 0x26, 0x26));
 		dark_palette.setColor(QPalette::WindowText, Qt::white);
 		dark_palette.setColor(QPalette::Base, QColor(42, 42, 42));
 		dark_palette.setColor(QPalette::Dark, QColor(35, 35, 35));
 		dark_palette.setColor(QPalette::Highlight, QColor(42, 130, 218));
 		qApp->setPalette(dark_palette);
 		is_dark_theme_ = true;
-	} else if (theme_name.compare("DarkStyle") == 0) {
+	} else if (value(Key_General_Theme).toInt() == 0) {
 		QPalette dark_palette;
 		dark_palette.setColor(QPalette::Window, QColor(53, 53, 53));
 		dark_palette.setColor(QPalette::WindowText, Qt::white);
@@ -249,6 +251,7 @@ void GlobalSettings::apply_theme()
 		dark_palette.setColor(QPalette::Text, Qt::white);
 		dark_palette.setColor(QPalette::Disabled, QPalette::Text, QColor(127, 127, 127));
 		dark_palette.setColor(QPalette::Dark, QColor(35, 35, 35));
+
 		dark_palette.setColor(QPalette::Shadow, QColor(20, 20, 20));
 		dark_palette.setColor(QPalette::Button, QColor(53, 53, 53));
 		dark_palette.setColor(QPalette::ButtonText, Qt::white);
@@ -334,11 +337,7 @@ void GlobalSettings::store_gvariant(QSettings &settings, GVariant *v)
 		g_variant_get_size(v));
 
 	settings.setValue("value", var_data);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	settings.setValue("type", (const char *)var_type_str);
-#else
 	settings.setValue("type", var_type_str);
-#endif
 
 	g_free(var_type_str);
 }

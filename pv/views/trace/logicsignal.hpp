@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -60,15 +62,15 @@ class LogicSignal : public Signal
 public:
 	static const float Oversampling;
 
-	static const QColor EdgeColor;
-	static const QColor HighColor;
-	static const QColor LowColor;
-	static const QColor SamplingPointColor;
+	QColor EdgeColor;
+	QColor HighColor;
+	QColor LowColor;
+	QColor SamplingPointColor;
 
 	static QColor TriggerMarkerBackgroundColor;
 	static const int TriggerMarkerPadding;
 	static const char* TriggerMarkerIcons[8];
-
+	int restore_signal_height_ = INT_MAX;
 	LogicSignal(pv::Session &session, shared_ptr<data::SignalBase> base);
 
 	virtual ~LogicSignal() = default;
@@ -105,13 +107,15 @@ public:
 	 */
 	virtual vector<data::LogicSegment::EdgePair> get_nearest_level_changes(uint64_t sample_pos);
 
+	int signal_height();
+	shared_ptr<pv::data::LogicSegment> get_logic_segment_to_paint() const override;
+Q_SIGNALS:
+	int change_signal_height();
 protected:
 	void paint_caps(QPainter &p, QLineF *const lines,
-		vector< pair<int64_t, bool> > &edges,
+		vector< pair<uint64_t, bool> > &edges,
 		bool level, double samples_per_pixel, double pixels_offset,
 		float x_offset, float y_offset);
-
-	shared_ptr<pv::data::LogicSegment> get_logic_segment_to_paint() const;
 
 	void init_trigger_actions(QWidget *parent);
 
@@ -133,6 +137,7 @@ protected Q_SLOTS:
 	void on_trigger();
 
 	void on_signal_height_changed(int height);
+	void on_set_none_trigger();
 
 protected:
 	QColor high_fill_color_;
@@ -150,7 +155,8 @@ protected:
 	QAction *trigger_falling_;
 	QAction *trigger_low_;
 	QAction *trigger_change_;
-
+	std::map<QAction*, QString> trigger_action_map_;
+	std::map<QString, bool> trigger_selected_map_;
 	static QCache<QString, const QIcon> icon_cache_;
 	static QCache<QString, const QPixmap> pixmap_cache_;
 

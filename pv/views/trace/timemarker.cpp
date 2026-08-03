@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,7 +44,7 @@ namespace pv {
 namespace views {
 namespace trace {
 
-const int TimeMarker::ArrowSize = 4;
+const int TimeMarker::ArrowSize = 9;
 
 TimeMarker::TimeMarker(
 	View &view, const QColor &color, const pv::util::Timestamp& time) :
@@ -88,9 +90,10 @@ QRectF TimeMarker::label_rect(const QRectF &rect) const
 {
 	QFontMetrics m(QApplication::font());
 	const QSizeF text_size(
-		max(m.boundingRect(get_display_text()).size().width(), ArrowSize),
+		max(m.boundingRect(get_text()).size().width(), ArrowSize),
 		m.height());
-	const QSizeF label_size(text_size + LabelPadding * 2);
+	QSizeF label_size(text_size + LabelPadding * 2);
+	label_size = QSizeF(label_size.width() + 8.0, label_size.height() + 4.5);
 	const float top = rect.height() - label_size.height() -
 		TimeMarker::ArrowSize - 0.5f;
 	const float x = get_x();
@@ -105,12 +108,12 @@ QRectF TimeMarker::hit_box_rect(const ViewItemPaintParams &pp) const
 	return QRectF(x - h / 2.0f, pp.top(), h, pp.height());
 }
 
-QString TimeMarker::get_display_text() const
+void TimeMarker::set_text(const QString &text)
 {
-	return get_text();
+	(void)text;
 }
 
-void TimeMarker::set_text(const QString &text)
+void TimeMarker::set_index_text(const QString &text)
 {
 	(void)text;
 }
@@ -121,13 +124,13 @@ void TimeMarker::paint_label(QPainter &p, const QRect &rect, bool hover)
 		return;
 
 	const qreal x = get_x();
-	const QRectF r(label_rect(rect));
+	QRectF r(label_rect(rect));
 
 	const QPointF points[] = {
 		r.topLeft(),
 		r.bottomLeft(),
 		QPointF(max(r.left(), x - ArrowSize), r.bottom()),
-		QPointF(x, rect.bottom()),
+		QPointF(x, rect.bottom() + 3),
 		QPointF(min(r.right(), x + ArrowSize), r.bottom()),
 		r.bottomRight(),
 		r.topRight()
@@ -138,7 +141,7 @@ void TimeMarker::paint_label(QPainter &p, const QRect &rect, bool hover)
 		QPointF(r.left() + 1, r.bottom() - 1),
 		QPointF(max(r.left() + 1, x - ArrowSize), r.bottom() - 1),
 		QPointF(min(max(r.left() + 1, x), r.right() - 1),
-			rect.bottom() - 1),
+			rect.bottom() - 1 + 3),
 		QPointF(min(r.right() - 1, x + ArrowSize), r.bottom() - 1),
 		QPointF(r.right() - 1, r.bottom() - 1),
 		QPointF(r.right() - 1, r.top() + 1),
@@ -163,7 +166,31 @@ void TimeMarker::paint_label(QPainter &p, const QRect &rect, bool hover)
 	p.drawPolygon(points, countof(points));
 
 	p.setPen(select_text_color(color_));
-	p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter, get_display_text());
+	r.translate(0, 1);
+	p.drawText(r, Qt::AlignCenter | Qt::AlignVCenter, get_text());
+
+	QPolygonF polygon;
+	for (int i = 2; i < 5;i++) {
+		polygon.append(points[i]);
+	}
+    QRectF boundingRect = polygon.boundingRect(); 
+
+    QString text = get_index_text();
+	QFont pre_font = p.font();
+	QFont font = pre_font;
+	font.setPixelSize(ArrowSize + 5);
+	font.setBold(true);
+	p.setFont(font);
+    QRectF textRect = p.fontMetrics().boundingRect(text);
+    textRect.moveCenter(boundingRect.center());
+	textRect.translate(0, -3);
+	p.setPen(QColor(0, 0, 0, 180));
+	textRect.translate(1, 1);
+	p.drawText(textRect, Qt::AlignCenter, text);
+	p.setPen(QColor(255, 240, 0));
+	textRect.translate(-1, -1);
+	p.drawText(textRect, Qt::AlignCenter, text);
+	p.setFont(pre_font);
 }
 
 void TimeMarker::paint_fore(QPainter &p, ViewItemPaintParams &pp)
@@ -184,8 +211,6 @@ pv::widgets::Popup* TimeMarker::create_popup(QWidget *parent)
 	popup->set_position(parent->mapToGlobal(
 		drag_point(parent->rect())), Popup::Bottom);
 
-	connect(popup, SIGNAL(closed()), this, SLOT(on_popup_closed()));
-
 	QFormLayout *const form = new QFormLayout(popup);
 	popup->setLayout(form);
 
@@ -198,13 +223,6 @@ pv::widgets::Popup* TimeMarker::create_popup(QWidget *parent)
 	form->addRow(tr("Time"), value_widget_);
 
 	return popup;
-}
-
-void TimeMarker::on_popup_closed()
-{
-	GlobalSettings settings;
-	if (!settings.value(GlobalSettings::Key_View_KeepRulerItemSelected).toBool())
-		select(false);
 }
 
 void TimeMarker::on_value_changed(const pv::util::Timestamp& value)

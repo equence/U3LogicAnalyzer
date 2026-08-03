@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -176,6 +178,9 @@ private:
 		const int width,
 		const unsigned int minor_tick_count,
 		function<QString(const pv::util::Timestamp&)> format_function);
+
+public Q_SLOTS:
+	void on_add_RuleFlag(QMouseEvent* ev);
 
 private Q_SLOTS:
 	void on_hover_point_changed(const QWidget* widget, const QPoint &hp);

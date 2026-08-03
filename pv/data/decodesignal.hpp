@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2017 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,9 +30,10 @@
 
 #include <QDebug>
 #include <QSettings>
+#include <QElapsedTimer>
 
-#include <libsigrokdecode/libsigrokdecode.h>
-
+// #include <libsigrokdecode/libsigrokdecode.h>
+#include "../../../libsigrokdecode/libsigrokdecode.h"
 #include <pv/data/decode/decoder.hpp>
 #include <pv/data/decode/row.hpp>
 #include <pv/data/decode/rowdata.hpp>
@@ -61,6 +64,12 @@ class Logic;
 class LogicSegment;
 class SignalBase;
 class SignalData;
+
+enum capture_state {
+	Stopped,
+	AwaitingTrigger,
+	Running
+};
 
 struct DecodeBinaryDataChunk
 {
@@ -97,7 +106,7 @@ class DecodeSignal : public SignalBase
 private:
 	static const double DecodeMargin;
 	static const double DecodeThreshold;
-	static const int64_t DecodeChunkLength;
+	uint64_t DecodeChunkLength;
 
 public:
 	DecodeSignal(pv::Session &session);
@@ -129,6 +138,7 @@ public:
 	const vector<decode::DecodeChannel> get_channels() const;
 	void auto_assign_signals(const shared_ptr<Decoder> dec);
 	void assign_signal(const uint16_t channel_id, shared_ptr<const SignalBase> signal);
+	void assign_signal_no_decode(const uint16_t channel_id, shared_ptr<const SignalBase> signal);
 	int get_assigned_signal_count() const;
 
 	void update_output_signals();
@@ -198,17 +208,19 @@ public:
 	virtual void save_settings(QSettings &settings) const;
 
 	virtual void restore_settings(QSettings &settings);
+	int signal_height() {return 0;};
+
+	void commit_decoder_channels();
 
 private:
 	bool all_input_segments_complete(uint32_t segment_id) const;
 	uint32_t get_input_segment_count() const;
 	double get_input_samplerate(uint32_t segment_id) const;
-
+	uint16_t get_input_channel_number(uint32_t segment_id);
+	uint16_t get_input_unit_size(uint32_t segment_id);
 	Decoder* get_decoder_by_instance(const srd_decoder *const srd_dec);
 
 	void update_channel_list();
-
-	void commit_decoder_channels();
 
 	void mux_logic_samples(uint32_t segment_id, const int64_t start, const int64_t end);
 	void logic_mux_proc();
@@ -239,6 +251,7 @@ Q_SIGNALS:
 	void decode_finished();
 	void channels_updated();
 	void annotation_visibility_changed();
+	void show_message(QString);
 
 private Q_SLOTS:
 	void on_capture_state_changed(int state);
@@ -277,6 +290,18 @@ private:
 	map<const srd_decoder*, shared_ptr<Logic>> output_logic_;
 	map<const srd_decoder*, vector<uint8_t>> output_logic_muxed_data_;
 	vector< shared_ptr<SignalBase>> output_signals_;
+	uint8_t* decode_chunk_;
+	uint8_t* decode_chunk_tmp_;
+	uint8_t* data_chunk_send_;
+	uint8_t* src_buffer_;
+	int src_buffer_unit_size_;
+	int current_state_;
+	bool allow_skip_ = true;
+
+	vector<vector<uint8_t>> mux_input_buffers_;   // 每个通道的输入缓冲区
+	vector<uint8_t> mux_output_buffer_;           // 输出缓冲区
+	vector<uint8_t> mux_zoom_buffer_;             // zoom缓冲区
+	uint64_t mux_buffer_capacity_;                // 缓冲区容量（样本数）
 };
 
 } // namespace data

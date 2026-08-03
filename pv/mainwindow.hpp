@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,10 +30,13 @@
 #include <QShortcut>
 #include <QTabWidget>
 #include <QToolButton>
-
+#include <QString>
+#include <QCheckBox>
+#include <future>
+#include "devicemanager.hpp"
 #include "session.hpp"
 #include "subwindows/subwindowbase.hpp"
-
+#include "subwindows/decoder_selector/subwindow.hpp"
 using std::list;
 using std::map;
 using std::shared_ptr;
@@ -72,13 +77,13 @@ private:
 	static const QString WindowTitle;
 
 public:
-	explicit MainWindow(DeviceManager &device_manager,
-		QWidget *parent = nullptr);
+	static bool checkSystemRequirements();
+	explicit MainWindow(QWidget *parent = nullptr);
 
 	~MainWindow();
 
 	static void show_session_error(const QString text, const QString info_text);
-
+ 	
 	shared_ptr<views::ViewBase> get_active_view() const;
 
 	shared_ptr<views::ViewBase> add_view(ViewType type, Session &session);
@@ -99,6 +104,7 @@ public:
 
 	void save_sessions();
 	void restore_sessions();
+	void add_default_setting();
 
 private:
 	void setup_ui();
@@ -116,12 +122,20 @@ private:
 	virtual bool restoreState(const QByteArray &state, int version = 0);
 
 Q_SIGNALS:
-	void session_error_raised(const QString text, const QString info_text);
+	void show_error();
+	void save_session();
 
 public Q_SLOTS:
 	void on_run_stop_clicked();
-	void on_session_error_raised(const QString text, const QString info_text);
+	void on_show_error(QString err);
+	void show_session_info(const QString info_text);
+	void show_device_detach();
+	void on_get_repeat_acquisition(bool& is_repeat_acquisition_state);
+	void on_device_attached();
 
+private:
+	void do_device_detach_switch();
+	
 private Q_SLOTS:
 	void on_add_view(ViewType type, Session *session);
 
@@ -151,19 +165,25 @@ private Q_SLOTS:
 
 	void on_close_current_tab();
 
+	void on_repeat_acquisition_clicked();
+
+	void on_close_decoder_dock(Session *session);
+
 private:
-	DeviceManager &device_manager_;
+	atomic<DeviceManager *> device_manager_;
+	// DeviceManager *device_manager_;
 
 	list< shared_ptr<Session> > sessions_;
 	shared_ptr<Session> last_focused_session_;
 
 	map< QDockWidget*, shared_ptr<views::ViewBase> > view_docks_;
 	map< QDockWidget*, shared_ptr<subwindows::SubWindowBase> > sub_windows_;
-
 	map< shared_ptr<Session>, QMainWindow*> session_windows_;
 
 	QWidget *static_tab_widget_;
-	QToolButton *new_session_button_, *run_stop_button_, *settings_button_;
+	// QToolButton *new_session_button_;
+	QToolButton *run_stop_button_, *settings_button_;
+	QCheckBox* repeat_acquisition_button_;
 	QTabWidget session_selector_;
 
 	QIcon icon_red_;
@@ -177,6 +197,10 @@ private:
 	QShortcut *run_stop_shortcut_;
 	QShortcut *close_application_shortcut_;
 	QShortcut *close_current_tab_shortcut_;
+	QString using_device_name;
+	bool is_repeat_acq_ = false;
+	bool is_wch_device_ = false;
+	bool attach_process_done = true;
 };
 
 } // namespace pv

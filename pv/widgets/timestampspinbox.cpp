@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2015 Jens Steinhauser <jens.steinhauser@gmail.com>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,12 +22,8 @@
 #include "timestampspinbox.hpp"
 
 #include <QLineEdit>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#include <QRegularExpression>
-#else
 #include <QRegExp>
-#endif
-
+bool settingValue_ = false;
 namespace pv {
 namespace widgets {
 
@@ -97,25 +95,10 @@ void TimestampSpinBox::setValue(const pv::util::Timestamp& val)
 
 void TimestampSpinBox::on_editingFinished()
 {
-	static const auto re_pattern = R"(\s*([-+]?)\s*([0-9]+\.?[0-9]*).*)";
+	QRegExp re(R"(\s*([-+]?)\s*([0-9]+\.?[0-9]*).*)");
 
-	bool has_match;
-	QStringList captures;
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	QRegularExpression re(re_pattern);
-	has_match = re.match(text()).hasMatch();
-	if (has_match) {
-		captures = re.match(text()).capturedTexts();
-	}
-#else
-	QRegExp re(re_pattern);
-	has_match = re.exactMatch(text());
-	if (has_match) {
-		captures = re.capturedTexts();
-	}
-#endif
-
-	if (has_match) {
+	if (re.exactMatch(text())) {
+		QStringList captures = re.capturedTexts();
 		captures.removeFirst(); // remove entire match
 		QString str = captures.join("");
 		setValue(pv::util::Timestamp(str.toStdString()));

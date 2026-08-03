@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -175,7 +177,7 @@ void Ruler::contextMenuEvent(QContextMenuEvent *event)
 		tr("Disable mouse hover marker") : tr("Enable mouse hover marker"));
 
 	event->setAccepted(true);
-	menu->popup(event->globalPos());
+	// menu->popup(event->globalPos());
 }
 
 void Ruler::resizeEvent(QResizeEvent*)
@@ -240,13 +242,14 @@ shared_ptr<ViewItem> Ruler::get_mouse_over_item(const QPoint &pt)
 	return nullptr;
 }
 
+void Ruler::on_add_RuleFlag(QMouseEvent* ev)
+{
+	mouseDoubleClickEvent(ev);
+}
+
 void Ruler::mouseDoubleClickEvent(QMouseEvent *event)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	hover_item_ = view_.add_flag(get_absolute_time_from_x_pos(event->pos().x()));
-#else
 	hover_item_ = view_.add_flag(get_absolute_time_from_x_pos(event->x()));
-#endif
 }
 
 void Ruler::paintEvent(QPaintEvent*)

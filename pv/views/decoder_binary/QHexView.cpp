@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2015 Victor Anjin <virinext@gmail.com>
  * Copyright (C) 2019 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * The MIT License (MIT)
  *
@@ -59,13 +61,13 @@ QHexView::QHexView(QWidget *parent):
 	selectEnd_(0),
 	cursorPos_(0),
 	visible_range_(0, 0),
-	highlighted_sample_(std::numeric_limits<uint64_t>::max())
+	highlighted_sample_(std::numeric_limits<uint64_t>::max()),
+	mouse_pressed_(false)
 {
 	setFont(QFont("Courier", 10));
 
 	charWidth_ = fontMetrics().boundingRect('X').width();
 	charHeight_ = fontMetrics().height();
-
 	setFocusPolicy(Qt::StrongFocus);
 
 	if (palette().color(QPalette::ButtonText).toHsv().value() > 127) {
@@ -76,10 +78,10 @@ QHexView::QHexView(QWidget *parent):
 		visible_range_color_ = QColor("#fff5ee");  // QColorConstants::Svg::seashell
 	} else {
 		// Color is dark
-		chunk_colors_.emplace_back(0, 0, 139);    // QColorConstants::Svg::darkblue
-		chunk_colors_.emplace_back(34, 139, 34);  // QColorConstants::Svg::forestgreen
-		chunk_colors_.emplace_back(160, 82, 45);  // QColorConstants::Svg::sienna
-		visible_range_color_ = QColor("#fff5ee"); // QColorConstants::Svg::seashell
+		chunk_colors_.emplace_back(255, 165, 0);  
+		chunk_colors_.emplace_back(0, 191, 255);  
+		chunk_colors_.emplace_back(255, 105, 180);
+		visible_range_color_ = QColor("#404047");
 	}
 }
 
@@ -102,9 +104,7 @@ void QHexView::set_data(const DecodeBinaryClass* data)
 			size += data_->chunks[i].data.size();
 	}
 	data_size_ = size;
-
 	address_digits_ = (uint8_t)QString::number(data_size_, 16).length();
-
 	// Calculate X coordinates of the three sub-areas
 	posAddr_  = 0;
 	posHex_   = address_digits_ * charWidth_ + GAP_ADR_HEX;
@@ -157,7 +157,17 @@ void QHexView::showFromOffset(size_t offset)
 
 QSizePolicy QHexView::sizePolicy() const
 {
-	return QSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+	return QSizePolicy(QSizePolicy::Minimum, QSizePolicy::Expanding);
+}
+
+QSize QHexView::minimumSizeHint() const
+{
+	return QSize(10, 10);
+}
+
+QSize QHexView::sizeHint() const
+{
+	return minimumSizeHint();
 }
 
 pair<size_t, size_t> QHexView::get_selection() const
@@ -290,10 +300,10 @@ uint8_t QHexView::get_next_byte(bool* is_new_chunk)
 QSize QHexView::getFullSize() const
 {
 	size_t width = posAscii_ + (BYTES_PER_LINE * charWidth_);
-
 	if (verticalScrollBar()->isEnabled())
 		width += GAP_ASCII_SLIDER + verticalScrollBar()->width();
-
+	if (!data_ || (data_size_ == 0) || (data_->chunks.empty()))
+		width = std::min(width, (size_t)10);
 	if (!data_ || (data_size_ == 0))
 		return QSize(width, 0);
 
@@ -303,7 +313,6 @@ QSize QHexView::getFullSize() const
 		height++;
 
 	height *= charHeight_;
-
 	return QSize(width, height);
 }
 
@@ -319,8 +328,7 @@ void QHexView::paintEvent(QPaintEvent *event)
 
 	// Calculate and update the widget and paint area sizes
 	QSize widgetSize = getFullSize();
-	setMinimumWidth(widgetSize.width());
-	setMaximumWidth(widgetSize.width());
+	setMinimumWidth(10);
 	QSize areaSize = viewport()->size() - QSize(0, charHeight_);
 
 	// Only show scrollbar if the content goes beyond the visible area
@@ -497,11 +505,7 @@ void QHexView::paintEvent(QPaintEvent *event)
 				painter.setPen(palette().color(QPalette::HighlightedText));
 			}
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-			painter.drawText(x, y, QString(QChar(ch)));
-#else
 			painter.drawText(x, y, QString(ch));
-#endif
 			x += charWidth_;
 		}
 
@@ -679,15 +683,17 @@ void QHexView::keyPressEvent(QKeyEvent *event)
 
 void QHexView::mouseMoveEvent(QMouseEvent *event)
 {
-	int actPos = cursorPosFromMousePos(event->pos());
-	setCursorPos(actPos);
-	setSelection(actPos);
-
-	viewport()->update();
+	if (mouse_pressed_) {
+		int actPos = cursorPosFromMousePos(event->pos());
+		setCursorPos(actPos);
+		setSelection(actPos);
+		viewport()->update();
+	}
 }
 
 void QHexView::mousePressEvent(QMouseEvent *event)
 {
+	mouse_pressed_ = true;
 	int cPos = cursorPosFromMousePos(event->pos());
 
 	if ((QApplication::keyboardModifiers() & Qt::ShiftModifier) && (event->button() == Qt::LeftButton))
@@ -698,6 +704,12 @@ void QHexView::mousePressEvent(QMouseEvent *event)
 	setCursorPos(cPos);
 
 	viewport()->update();
+}
+
+void QHexView::mouseReleaseEvent(QMouseEvent *event)
+{
+	(void)event;
+	mouse_pressed_ = false;
 }
 
 size_t QHexView::cursorPosFromMousePos(const QPoint &position)

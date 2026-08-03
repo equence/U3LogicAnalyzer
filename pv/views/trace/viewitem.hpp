@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -175,13 +177,13 @@ public:
 	 * @param event the mouse event that triggered this handler.
 	 */
 	virtual void mouse_left_press_event(const QMouseEvent* event);
-
+	QPoint drag_point_;
 protected:
 	static QPen highlight_pen();
 
 protected:
 	QWidget *context_parent_;
-	QPoint drag_point_;
+	
 
 private:
 	bool selected_;

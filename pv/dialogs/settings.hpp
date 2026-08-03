@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2017 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,12 +76,12 @@ private Q_SLOTS:
 	void on_view_fillSignalHighAreaColor_changed(QColor color);
 	void on_view_showAnalogMinorGrid_changed(int state);
 	void on_view_showHoverMarker_changed(int state);
-	void on_view_keepRulerItemSelected_changed(int state);
 	void on_view_snapDistance_changed(int value);
 	void on_view_cursorFillColor_changed(QColor color);
 	void on_view_conversionThresholdDispMode_changed(int state);
 	void on_view_defaultDivHeight_changed(int value);
 	void on_view_defaultLogicHeight_changed(int value);
+	void on_set_threshold_level(float value);
 #ifdef ENABLE_DECODE
 	void on_dec_initialStateConfigurable_changed(int state);
 	void on_dec_exportFormat_changed(const QString &text);

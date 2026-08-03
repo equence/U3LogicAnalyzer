@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -78,6 +80,8 @@ class CustomScrollArea : public QAbstractScrollArea
 public:
 	CustomScrollArea(QWidget *parent = nullptr);
 	bool viewportEvent(QEvent *event);
+protected:
+	void scrollContentsBy(int dx, int dy) override;
 };
 
 class View : public ViewBase, public TraceTreeItemOwner, public GlobalSettingsInterface
@@ -125,6 +129,12 @@ public:
 	virtual void clear_signalbases();
 	virtual void add_signalbase(const shared_ptr<data::SignalBase> signalbase);
 	virtual void remove_signalbase(const shared_ptr<data::SignalBase> signalbase);
+	
+	double current_max_offset_ = 2500.00;
+	double current_max_scale_ = 2500.00;
+	int restore_min_logic_height_ = INT_MAX;
+	bool is_press_header_ = false;
+	uint64_t bezier_start_sample_ = 0;
 
 #ifdef ENABLE_DECODE
 	virtual void clear_decode_signals();
@@ -133,7 +143,8 @@ public:
 
 	virtual void remove_decode_signal(shared_ptr<data::DecodeSignal> signal);
 #endif
-
+	int viewport_width();
+	int viewport_height();
 	void remove_trace(shared_ptr<Trace> trace);
 
 	shared_ptr<Signal> get_signal_under_mouse_cursor() const;
@@ -325,14 +336,22 @@ public:
 	 * @param p The current position of the mouse cursor
 	 * @return The sample number of the nearest level change or -1 if none
 	 */
-	int64_t get_nearest_level_change(const QPoint &p);
+	uint64_t get_nearest_level_change(const QPoint &p);
 
 	void restack_all_trace_tree_items();
 
 	int header_width() const;
 
 	void on_setting_changed(const QString &key, const QVariant &value);
+	void renew_measure();
+	void renew_bezier_measure();
+	float update_bezier_start();
+	Header * header();
 
+	void update_scale_offset(bool is_set = false);
+	uint64_t get_leftmost_samples();
+	uint64_t get_rightmost_samples();
+	
 Q_SIGNALS:
 	void hover_point_changed(const QWidget* widget, const QPoint &hp);
 
@@ -369,6 +388,12 @@ Q_SIGNALS:
 
 	/// Emitted when the cursors are shown/hidden
 	void cursor_state_changed(bool show);
+
+	void signal_height_change(int height);
+
+	void decode_signal_height_change(int height);
+
+	void press_delete();
 
 public Q_SLOTS:
 	void trigger_event(int segment_id, util::Timestamp location);
@@ -415,7 +440,8 @@ private:
 	void determine_time_unit();
 
 	bool eventFilter(QObject *object, QEvent *event);
-
+	void keyPressEvent(QKeyEvent *event);
+	
 	virtual void contextMenuEvent(QContextMenuEvent *event);
 
 	void resizeEvent(QResizeEvent *event);
@@ -429,6 +455,22 @@ public:
 
 	void extents_changed(bool horz, bool vert);
 
+		/**
+	 * Sets the 'offset_' and ruler_offset_ members and emits the 'offset_changed'
+	 * signal if needed.
+	 */
+	void set_offset(const pv::util::Timestamp& offset, bool force_update = false);
+
+	/**
+	 * Sets the 'scale_' member and emits the 'scale_changed'
+	 * signal if needed.
+	 */
+	void set_scale(double scale);
+
+	void update_signals_height();
+
+	void update_restore_logic_height(int height);
+	void update_header();
 private Q_SLOTS:
 	void on_signal_name_changed();
 	void on_splitter_moved();
@@ -452,23 +494,13 @@ private Q_SLOTS:
 
 	void on_settingViewTriggerIsZeroTime_changed(const QVariant new_value);
 
-	void on_create_marker_here();
-
 	virtual void perform_delayed_view_update();
 
 	void process_sticky_events();
 
-	/**
-	 * Sets the 'offset_' and ruler_offset_ members and emits the 'offset_changed'
-	 * signal if needed.
-	 */
-	void set_offset(const pv::util::Timestamp& offset, bool force_update = false);
 
-	/**
-	 * Sets the 'scale_' member and emits the 'scale_changed'
-	 * signal if needed.
-	 */
-	void set_scale(double scale);
+
+	
 
 	/**
 	 * Sets the 'tick_prefix_' member and emits the 'tick_prefix_changed'
@@ -566,6 +598,7 @@ private:
 
 	unsigned int sticky_events_;
 	QTimer lazy_event_handler_;
+	QTimer measure_timer_;
 
 	// This is true when the defaults couldn't be set due to insufficient info
 	bool scroll_needs_defaults_;
@@ -577,8 +610,7 @@ private:
 	double scale_at_acq_start_;
 	pv::util::Timestamp offset_at_acq_start_;
 
-	// X coordinate of mouse cursor where the user clicked to open a context menu
-	uint32_t context_menu_x_pos_;
+	bool preserve_signal_height_;
 };
 
 } // namespace trace

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -103,6 +105,13 @@ public:
 	 * @param pp the painting parameters object to paint with.
 	 */
 	virtual void paint_fore(QPainter &p, ViewItemPaintParams &pp);
+
+	/**
+	 * Draw a hover marker with voltage label at cursor position.
+	 * Overrides the base class to add voltage value display for ADC signals.
+	 * @param p The painter to draw into.
+	 */
+	void paint_hover_marker(QPainter &p) override;
 
 private:
 	void paint_grid(QPainter &p, int y, int left, int right);

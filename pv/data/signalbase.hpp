@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
  * Copyright (C) 2016 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -114,7 +116,11 @@ public:
 	};
 
 	static const QColor AnalogSignalColors[8];
-	static const QColor LogicSignalColors[10];
+	static const QColor LogicSignalColors[4];
+	int height_;
+
+	atomic<uint64_t> start_decode_pos_;
+	atomic<uint64_t> end_decode_pos_;
 
 private:
 	static const int ColorBGAlpha;
@@ -387,6 +393,8 @@ Q_SIGNALS:
 		uint64_t end_sample);
 
 	void min_max_changed(float min, float max);
+	void set_none_trigger();
+
 
 private Q_SLOTS:
 	void on_samples_cleared();
@@ -424,6 +432,7 @@ protected:
 	unsigned int index_;
 
 	QString error_message_;
+
 };
 
 } // namespace data

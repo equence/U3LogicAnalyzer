@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2017 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -51,6 +53,7 @@
 
 #include <libsigrokcxx/libsigrokcxx.hpp>
 
+
 #ifdef ENABLE_DECODE
 #include <libsigrokdecode/libsigrokdecode.h>
 #endif
@@ -84,7 +87,7 @@ public:
 };
 
 Settings::Settings(DeviceManager &device_manager, QWidget *parent) :
-	QDialog(parent),
+	QDialog(parent, nullptr),
 	device_manager_(device_manager)
 {
 	resize(600, 400);
@@ -220,7 +223,7 @@ QWidget *Settings::get_general_settings_form(QWidget *parent) const
 	QComboBox *language_cb = new QComboBox();
 	Application* a = qobject_cast<Application*>(QApplication::instance());
 
-	QString current_language = settings.value(GlobalSettings::Key_General_Language, "en").toString();
+	QString current_language = settings.value(GlobalSettings::Key_General_Language).toString();
 	for (const QString& language : a->get_languages()) {
 		const QLocale locale = QLocale(language);
 		const QString desc = locale.languageToString(locale.language());
@@ -231,13 +234,8 @@ QWidget *Settings::get_general_settings_form(QWidget *parent) const
 			language_cb->setCurrentIndex(index);
 		}
 	}
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	connect(language_cb, SIGNAL(currentTextChanged(const QString&)),
-		this, SLOT(on_general_language_changed(const QString&)));
-#else
 	connect(language_cb, SIGNAL(currentIndexChanged(const QString&)),
 		this, SLOT(on_general_language_changed(const QString&)));
-#endif
 	general_layout->addRow(tr("User interface language"), language_cb);
 
 	// Theme combobox
@@ -251,7 +249,7 @@ QWidget *Settings::get_general_settings_form(QWidget *parent) const
 		this, SLOT(on_general_theme_changed(int)));
 	general_layout->addRow(tr("User interface theme"), theme_cb);
 
-	QLabel *description_1 = new QLabel(tr("(You may need to restart PulseView for all UI elements to update)"));
+	QLabel *description_1 = new QLabel(tr("(You may need to restart software for all UI elements to update)"));
 	description_1->setAlignment(Qt::AlignRight);
 	general_layout->addRow(description_1);
 
@@ -266,7 +264,7 @@ QWidget *Settings::get_general_settings_form(QWidget *parent) const
 	if (current_style.isEmpty())
 		style_cb->setCurrentIndex(0);
 	else
-		style_cb->setCurrentIndex(style_cb->findText(current_style));
+		style_cb->setCurrentIndex(style_cb->findText(current_style, nullptr));
 
 	connect(style_cb, SIGNAL(currentIndexChanged(int)),
 		this, SLOT(on_general_style_changed(int)));
@@ -351,12 +349,8 @@ QWidget *Settings::get_view_settings_form(QWidget *parent) const
 		SLOT(on_view_showHoverMarker_changed(int)));
 	trace_view_layout->addRow(tr("Highlight mouse cursor using a vertical marker line"), cb);
 
-	cb = create_checkbox(GlobalSettings::Key_View_KeepRulerItemSelected,
-		SLOT(on_view_keepRulerItemSelected_changed(int)));
-	trace_view_layout->addRow(tr("Keep active item on ruler selected when editing popup is closed"), cb);
-
 	QSpinBox *snap_distance_sb = new QSpinBox();
-	snap_distance_sb->setRange(0, 1000);
+	snap_distance_sb->setRange(0, 4000);
 	snap_distance_sb->setSuffix(tr(" pixels"));
 	snap_distance_sb->setValue(
 		settings.value(GlobalSettings::Key_View_SnapDistance).toInt());
@@ -479,14 +473,14 @@ QWidget *Settings::get_about_page(QWidget *parent) const
 	for (QString &entry : a->get_fw_path_list())
 		s.append(QString("<tr><td colspan=\"2\">%1</td></tr>").arg(entry));
 
-#ifdef ENABLE_DECODE
-	s.append("<tr><td colspan=\"2\"></td></tr>");
-	s.append("<tr><td colspan=\"2\"><b>" +
-		tr("Protocol decoder search paths:") + "</b></td></tr>");
-	for (QString &entry : a->get_pd_path_list())
-		s.append(QString("<tr><td colspan=\"2\">%1</td></tr>").arg(entry));
-	s.append(tr("<tr><td colspan=\"2\">(Note: Set environment variable SIGROKDECODE_DIR to add a custom directory)</td></tr>"));
-#endif
+// #ifdef ENABLE_DECODE
+// 	s.append("<tr><td colspan=\"2\"></td></tr>");
+// 	s.append("<tr><td colspan=\"2\"><b>" +
+// 		tr("Protocol decoder search paths:") + "</b></td></tr>");
+// 	for (QString &entry : a->get_pd_path_list())
+// 		s.append(QString("<tr><td colspan=\"2\">%1</td></tr>").arg(entry));
+// 	s.append(tr("<tr><td colspan=\"2\">(Note: Set environment variable SIGROKDECODE_DIR to add a custom directory)</td></tr>"));
+// #endif
 
 	s.append("<tr><td colspan=\"2\"></td></tr>");
 	s.append("<tr><td colspan=\"2\"><b>" +
@@ -769,12 +763,6 @@ void Settings::on_view_showHoverMarker_changed(int state)
 	settings.setValue(GlobalSettings::Key_View_ShowHoverMarker, state ? true : false);
 }
 
-void Settings::on_view_keepRulerItemSelected_changed(int state)
-{
-	GlobalSettings settings;
-	settings.setValue(GlobalSettings::Key_View_KeepRulerItemSelected, state ? true : false);
-}
-
 void Settings::on_view_snapDistance_changed(int value)
 {
 	GlobalSettings settings;
@@ -803,6 +791,12 @@ void Settings::on_view_defaultLogicHeight_changed(int value)
 {
 	GlobalSettings settings;
 	settings.setValue(GlobalSettings::Key_View_DefaultLogicHeight, value);
+}
+
+void Settings::on_set_threshold_level(float value)
+{
+	GlobalSettings settings;
+	settings.setValue(GlobalSettings::Key_ThresholdLevel, value);
 }
 
 #ifdef ENABLE_DECODE

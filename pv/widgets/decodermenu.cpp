@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -57,11 +59,7 @@ DecoderMenu::DecoderMenu(QWidget *parent, const char* input, bool first_level_de
 	}
 	g_slist_free(li);
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	connect(&mapper_, SIGNAL(mappedObject(QObject*)), this, SLOT(on_action(QObject*)));
-#else
 	connect(&mapper_, SIGNAL(mapped(QObject*)), this, SLOT(on_action(QObject*)));
-#endif
 }
 
 int DecoderMenu::decoder_name_cmp(const void *a, const void *b)

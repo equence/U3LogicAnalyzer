@@ -88,11 +88,10 @@ public:
 
 	float* get_iterator_value_ptr(SegmentDataIterator* it);
 
-	void get_envelope_section(EnvelopeSection &s,
-		uint64_t start, uint64_t end, float min_length) const;
+	void get_envelope_section(EnvelopeSection &s, uint64_t start, uint64_t end, float min_length) const;
 
 private:
-	void reallocate_envelope(Envelope &e);
+	bool reallocate_envelope(Envelope &e);
 
 	void append_payload_to_envelope_levels();
 

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,11 +22,11 @@
 #include <QApplication>
 #include <QMouseEvent>
 #include <QTouchEvent>
-
+#include <unistd.h>
 #include "tracetreeitem.hpp"
 #include "view.hpp"
 #include "viewwidget.hpp"
-
+#include <QDateTime>
 using std::any_of;
 using std::shared_ptr;
 using std::vector;
@@ -124,7 +126,6 @@ void ViewWidget::drag_items(const QPoint &delta)
 	for (const shared_ptr<TraceTreeItem>& i : trace_tree_items)
 		if (i->dragging())
 			item_owner = i->owner();
-
 	if (item_owner) {
 		item_owner->restack_items();
 		for (shared_ptr<TraceTreeItem> i : trace_tree_items)
@@ -133,15 +134,23 @@ void ViewWidget::drag_items(const QPoint &delta)
 
 	// Drag the time items
 	const vector< shared_ptr<TimeItem> > items(view_.time_items());
-	for (auto &i : items)
+	for (auto &i : items){
 		if (i->dragging()) {
 			i->drag_by(delta);
 			item_dragged = true;
 		}
-
-	// Do the background drag
-	if (!item_dragged)
-		drag_by(delta);
+	}
+	if (!item_dragged) {
+		if (new_offset_ >= 0 && (new_offset_ + view_.scale() * view_.viewport_width()) <= view_.current_max_offset_) {
+			drag_by(delta);
+		} else {
+			if (new_offset_ < 0){
+			view_.set_offset(0, true);
+		} else{
+			view_.set_offset(view_.current_max_offset_ - view_.scale() * view_.viewport_width(), true);
+		}
+		}
+	}
 }
 
 void ViewWidget::drag()
@@ -168,7 +177,6 @@ void ViewWidget::mouse_left_press_event(QMouseEvent *event)
 	if ((!mouse_down_item_ || !mouse_down_item_->selected()) &&
 		!ctrl_pressed)
 		clear_selection();
-
 	// Set the signal selection state if the item has been clicked
 	if (mouse_down_item_ && mouse_down_item_->is_selectable(event->pos())) {
 		if (ctrl_pressed)
@@ -308,12 +316,10 @@ void ViewWidget::mouseMoveEvent(QMouseEvent *event)
 
 	if (!event->buttons())
 		item_hover(get_mouse_over_item(event->pos()), event->pos());
-
 	if (event->buttons() & Qt::LeftButton) {
 		if (event->modifiers() & Qt::ShiftModifier) {
 			// Cursor drag
 			pv::util::Timestamp current_offset = view_.offset() + event->pos().x() * view_.scale();
-
 			const int drag_distance = qAbs(current_offset.convert_to<double>() -
 				mouse_down_offset_.convert_to<double>()) / view_.scale();
 
@@ -322,24 +328,22 @@ void ViewWidget::mouseMoveEvent(QMouseEvent *event)
 				view_.set_cursors(mouse_down_offset_, current_offset);
 			} else
 				view_.show_cursors(false);
-
 		} else {
-			if (!item_dragging_) {
+			if (!item_dragging_) {				
 				if ((event->pos() - mouse_down_point_).manhattanLength() <
 					QApplication::startDragDistance())
 					return;
-
 				if (!accept_drag())
 					return;
 
 				item_dragging_ = true;
 			}
-
 			// Do the drag
-			drag_items(event->pos() - mouse_down_point_);
+			QPoint pos = event->pos() - mouse_down_point_;
+			new_offset_ = (double)view_.offset() - pos.x() * view_.scale();
+			drag_items(pos);
 		}
 	}
-
 	// Force a repaint of the widget to update highlighted parts
 	update();
 }

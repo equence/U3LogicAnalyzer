@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2014 Martin Ling <martin-sigrok@earth.li>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,9 +64,9 @@ Application::Application(int &argc, char* argv[]) :
 	QApplication(argc, argv)
 {
 	setApplicationVersion(PV_VERSION_STRING);
-	setApplicationName("PulseView");
-	setOrganizationName("sigrok");
-	setOrganizationDomain("sigrok.org");
+	setApplicationName("U3LogicAnalyzer");
+	setOrganizationName("LogicAnalyzer");
+	// setOrganizationDomain("sigrok.org");
 }
 
 const QStringList Application::get_languages() const
@@ -86,11 +88,14 @@ const QStringList Application::get_languages() const
 const QString Application::get_language_editors(const QString& language) const
 {
 	if (language == "de") return "Sören Apel, Uwe Hermann";
-	if (language == "es_MX") return "Carlos Diaz, Ulices Avila Hernandez";
-	if (language == "ja_jp") return "Yukari Shoji";
-	if (language == "zh_cn") return "ZtyPro";
+	if (language == "es_mx") return "Carlos Diaz";
 
 	return QString();
+}
+
+void Application::set_hardware_version(uint64_t hardware_version)
+{
+	hd_version_ = hardware_version;
 }
 
 void Application::switch_language(const QString& language)
@@ -108,11 +113,7 @@ void Application::switch_language(const QString& language)
 			qWarning() << "Translation resource" << resource << "not found";
 
 		// Qt translations
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-		QString tr_path(QLibraryInfo::path(QLibraryInfo::TranslationsPath));
-#else
 		QString tr_path(QLibraryInfo::location(QLibraryInfo::TranslationsPath));
-#endif
 
 		if (qt_translator_.load("qt_" + language, tr_path))
 			installTranslator(&qt_translator_);
@@ -128,19 +129,10 @@ void Application::switch_language(const QString& language)
 				tr_path << ", Qt translations package is probably missing";
 	}
 
-	if (!topLevelWidgets().empty()) {
-		// Force all windows to update
-		for (QWidget *widget : topLevelWidgets())
-			widget->update();
-
-		QMessageBox msg(topLevelWidgets().front());
-		msg.setText(tr("Some parts of the application may still " \
-				"use the previous language. Re-opening the affected windows or " \
-				"restarting the application will remedy this."));
-		msg.setStandardButtons(QMessageBox::Ok);
-		msg.setIcon(QMessageBox::Information);
-		msg.exec();
-	}
+	// Force LanguageChange event to all widgets for immediate retranslation
+	QEvent lang_event(QEvent::LanguageChange);
+	for (QWidget *widget : topLevelWidgets())
+		QApplication::sendEvent(widget, &lang_event);
 }
 
 void Application::on_setting_changed(const QString &key, const QVariant &value)
@@ -152,12 +144,24 @@ void Application::on_setting_changed(const QString &key, const QVariant &value)
 void Application::collect_version_info(pv::DeviceManager &device_manager)
 {
 	// Library versions and features
-	version_info_.emplace_back(applicationName(), applicationVersion());
+	QString version_str;
+	version_info_.emplace_back("U3LogicAnalyzer", "1.1 base on pulseview 0.5.0-git-7e5c839");
+	if (hd_version_ == 0){
+		version_str = "null-null";
+	}else{
+		version_str = QString::number((hd_version_ >> 16)&0xff);   // 01 01 00 01   16842753
+		version_str += ".";
+		version_str += QString::number((hd_version_ >> 24)&0xff);     
+		version_str += "-";
+		version_str += QString::number((hd_version_ >> 0)&0xff);
+		version_str += ".";
+		version_str += QString::number((hd_version_ >> 8)&0xff);
+	}
+	version_info_.emplace_back("CH569-FPGA", version_str);
 	version_info_.emplace_back("Qt", qVersion());
 	version_info_.emplace_back("glibmm", PV_GLIBMM_VERSION);
 	version_info_.emplace_back("Boost", BOOST_LIB_VERSION);
 	version_info_.emplace_back("exprtk", QString::fromUtf8(exprtk::information::date));
-
 	version_info_.emplace_back("libsigrok", QString("%1/%2 (rt: %3/%4)")
 		.arg(SR_PACKAGE_VERSION_STRING, SR_LIB_VERSION_STRING,
 		sr_package_version_string_get(), sr_lib_version_string_get()));
@@ -243,6 +247,38 @@ void Application::collect_version_info(pv::DeviceManager &device_manager)
 	}
 	g_slist_free(sl);
 #endif
+}
+
+void Application::renew_version_info()
+{
+	//low bit is fpga
+	QString version_str;
+	version_str = QString::number((hd_version_ >> 16)&0xff); 
+	version_str += ".";
+	version_str += QString::number((hd_version_ >> 24)&0xff);     
+	version_str += "-";
+	version_str += QString::number((hd_version_ >> 0)&0xff);
+	version_str += ".";
+	version_str += QString::number((hd_version_ >> 8)&0xff);
+	for (pair<QString, QString>& entry : version_info_){
+		if (entry.first == "CH569-FPGA"){
+			entry.second = version_str;
+			break;
+		}
+	}
+	UpdateFwVersion_ = new QProcess;
+	QString workpath = QApplication::applicationDirPath() + "/res";
+    UpdateFwVersion_->setWorkingDirectory(workpath);
+    QString openPath = QApplication::applicationDirPath() + "/res/UpdateFwVersion.exe";
+	QStringList arg;
+	arg << QString::number((hd_version_ >> 16)&0xff) << QString::number((hd_version_ >> 24)&0xff);
+	UpdateFwVersion_->start(openPath, arg);
+	if (UpdateFwVersion_->waitForStarted()) {
+        qDebug() << "UpdateFwVersion start success" << UpdateFwVersion_->state();
+    } else {
+        qDebug() << "UpdateFwVersion start fail" << UpdateFwVersion_->state();
+    }
+	print_version_info();
 }
 
 void Application::print_version_info()

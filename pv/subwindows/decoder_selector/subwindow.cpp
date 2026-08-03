@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2018 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -120,7 +122,6 @@ SubWindow::SubWindow(Session& session, QWidget* parent) :
 	tree_view_->setRootIsDecorated(true);
 	tree_view_->setSortingEnabled(true);
 	tree_view_->sortByColumn(0, Qt::AscendingOrder);
-
 	// Hide the columns that hold the detailed item information
 	tree_view_->hideColumn(2);  // ID
 
@@ -137,9 +138,11 @@ SubWindow::SubWindow(Session& session, QWidget* parent) :
 	QScrollArea* info_label_body_container = new QScrollArea();
 	info_label_body_container->setWidget(info_label_body_);
 	info_label_body_container->setWidgetResizable(true);
+	info_label_body_container->setStyleSheet("QScrollArea { padding: 8px; }");
 
 	info_box_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 	QVBoxLayout* info_box_layout = new QVBoxLayout(info_box_);
+	info_box_layout->setContentsMargins(8, 8, 8, 8);
 	info_box_layout->addWidget(info_label_header_);
 	info_box_layout->addWidget(info_label_body_container);
 	info_box_layout->addWidget(info_label_footer_);
@@ -149,6 +152,7 @@ SubWindow::SubWindow(Session& session, QWidget* parent) :
 	info_label_header_->setTextInteractionFlags(flags);
 	info_label_body_->setWordWrap(true);
 	info_label_body_->setTextInteractionFlags(flags);
+	info_label_body_->setStyleSheet("color: rgba(255, 255, 255, 200);");
 	info_label_body_->setText(QString(tr(initial_notice)));
 	info_label_body_->setAlignment(Qt::AlignTop);
 	info_label_footer_->setWordWrap(true);
@@ -166,6 +170,7 @@ SubWindow::SubWindow(Session& session, QWidget* parent) :
 
 	connect(this, SIGNAL(new_decoders_selected(vector<const srd_decoder*>)),
 		&session, SLOT(on_new_decoders_selected(vector<const srd_decoder*>)));
+	connect(this, SIGNAL(renew_last_decoder_name(QString)), &session, SLOT(on_renew_last_decoder_name(QString)));
 
 	// Place the keyboard cursor in the filter QLineEdit initially
 	filter->setFocus();
@@ -173,7 +178,7 @@ SubWindow::SubWindow(Session& session, QWidget* parent) :
 
 bool SubWindow::has_toolbar() const
 {
-	return true;
+	return false;
 }
 
 QToolBar* SubWindow::create_toolbar(QWidget *parent) const
@@ -236,6 +241,11 @@ void SubWindow::on_item_changed(const QModelIndex& index)
 
 		const srd_decoder* d = srd_decoder_get_by_id(decoder_name.toUtf8());
 
+		if (d == nullptr) {
+			qWarning() << "Decoder not found:" << decoder_name;
+			return;
+		}
+
 		id = QString::fromUtf8(d->id);
 		longname = QString::fromUtf8(d->longname);
 		desc = QString::fromUtf8(d->desc);
@@ -267,6 +277,73 @@ void SubWindow::on_item_changed(const QModelIndex& index)
 		info_label_footer_->clear();
 }
 
+void SubWindow::add_default_decoder(QStringList decoder_list)
+{
+	for (const QString &decoder : decoder_list) {
+        const srd_decoder* chosen_decoder = srd_decoder_get_by_id(decoder.toUtf8());
+		if (chosen_decoder == nullptr)
+			continue;
+		vector<const srd_decoder*> decoders;
+		decoders.push_back(chosen_decoder);
+		renew_last_decoder_name(decoder);
+		// If the decoder only depends on logic inputs, we add it and are done
+		vector<const char*> inputs = get_decoder_inputs(decoders.front());
+		if (inputs.size() == 0) {
+			qWarning() << "Protocol decoder" << decoder << "cannot have 0 inputs!";
+			continue;
+		}
+		if (strcmp(inputs.at(0), "logic") == 0) {
+			new_decoders_selected(decoders);
+			continue;
+		}
+		// Check if we can automatically fulfill the stacking requirements
+		while (strcmp(inputs.at(0), "logic") != 0) {
+			vector<const srd_decoder*> prov_decoders = get_decoders_providing(inputs.at(0));
+
+			if (prov_decoders.size() == 0) {
+				// Emit warning and add the stack that we could gather so far
+				qWarning() << "Protocol decoder" << QString::fromUtf8(decoders.back()->id) \
+					<< "has input that no other decoder provides:" << QString::fromUtf8(inputs.at(0));
+				break;
+			}
+
+			if (prov_decoders.size() == 1) {
+				decoders.push_back(prov_decoders.front());
+			} else {
+				// Let user decide which one to use
+				QString caption = QString(tr("Protocol decoder <b>%1</b> requires input type <b>%2</b> " \
+					"which several decoders provide.<br>Choose which one to use:<br>"))
+						.arg(QString::fromUtf8(decoders.back()->id), QString::fromUtf8(inputs.at(0)));
+
+				QStringList items;
+				for (const srd_decoder* d : prov_decoders)
+					items << QString::fromUtf8(d->id) + " (" + QString::fromUtf8(d->longname) + ")";
+				bool ok_clicked;
+				QString item = QInputDialog::getItem(this, tr("Choose Decoder"),
+					tr(caption.toUtf8()), items, 0, false, &ok_clicked);
+
+				if ((!ok_clicked) || (item.isEmpty())){
+					break;
+				}
+
+				QString d = item.section(' ', 0, 0);
+				const srd_decoder* stacked_decoder = srd_decoder_get_by_id(d.toUtf8());
+				if (stacked_decoder == nullptr) {
+					qWarning() << "Stacked decoder not found:" << d;
+					return;
+				}
+				decoders.push_back(stacked_decoder);
+			}
+
+			inputs = get_decoder_inputs(decoders.back());
+		}
+
+		// Reverse decoder list and add the stack
+		reverse(decoders.begin(), decoders.end());
+		new_decoders_selected(decoders);
+	}
+}
+
 void SubWindow::on_item_activated(const QModelIndex& index)
 {
 	if (!index.isValid())
@@ -274,7 +351,6 @@ void SubWindow::on_item_activated(const QModelIndex& index)
 
 	QModelIndex id_index = index.model()->index(index.row(), 2, index.parent());
 	QString decoder_name = index.model()->data(id_index, Qt::DisplayRole).toString();
-
 	const srd_decoder* chosen_decoder = srd_decoder_get_by_id(decoder_name.toUtf8());
 	if (chosen_decoder == nullptr)
 		return;
@@ -288,7 +364,7 @@ void SubWindow::on_item_activated(const QModelIndex& index)
 		qWarning() << "Protocol decoder" << decoder_name << "cannot have 0 inputs!";
 		return;
 	}
-
+	renew_last_decoder_name(decoder_name);
 	if (strcmp(inputs.at(0), "logic") == 0) {
 		new_decoders_selected(decoders);
 		return;
@@ -324,7 +400,12 @@ void SubWindow::on_item_activated(const QModelIndex& index)
 				return;
 
 			QString d = item.section(' ', 0, 0);
-			decoders.push_back(srd_decoder_get_by_id(d.toUtf8()));
+			const srd_decoder* stacked_decoder = srd_decoder_get_by_id(d.toUtf8());
+			if (stacked_decoder == nullptr) {
+				qWarning() << "Stacked decoder not found:" << d;
+				return;
+			}
+			decoders.push_back(stacked_decoder);
 		}
 
 		inputs = get_decoder_inputs(decoders.back());
@@ -332,7 +413,7 @@ void SubWindow::on_item_activated(const QModelIndex& index)
 
 	// Reverse decoder list and add the stack
 	reverse(decoders.begin(), decoders.end());
-	new_decoders_selected(decoders);
+	new_decoders_selected(decoders); 
 }
 
 void SubWindow::on_filter_changed(const QString& text)

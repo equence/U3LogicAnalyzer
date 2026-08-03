@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -45,7 +47,6 @@ struct LongPulses;
 
 namespace pv {
 namespace data {
-
 class Logic;
 
 class LogicSegment : public Segment, public enable_shared_from_this<Segment>
@@ -53,8 +54,7 @@ class LogicSegment : public Segment, public enable_shared_from_this<Segment>
 	Q_OBJECT
 
 public:
-	typedef pair<int64_t, bool> EdgePair;
-
+	typedef pair<uint64_t, bool> EdgePair;
 	static const unsigned int ScaleStepCount = 10;
 	static const int MipMapScalePower;
 	static const int MipMapScaleFactor;
@@ -71,7 +71,8 @@ private:
 
 public:
 	LogicSegment(pv::data::Logic& owner, uint32_t segment_id,
-		unsigned int unit_size, uint64_t samplerate);
+		unsigned int unit_size, uint64_t samplerate,
+		uint64_t max_samples = 0);
 
 	virtual ~LogicSegment();
 
@@ -85,7 +86,7 @@ public:
 
 	void append_payload(shared_ptr<sigrok::Logic> logic);
 	void append_payload(void *data, uint64_t data_size);
-
+	void append_payload_decode(void *data, uint64_t data_size);
 	/**
 	 * Appends sample data for a single channel where each byte
 	 * represents one sample - if it's 0 the state is low, if 1 high.
@@ -100,6 +101,16 @@ public:
 		uint64_t data_size, vector<uint8_t>& destination);
 
 	void get_samples(int64_t start_sample, int64_t end_sample, uint8_t* dest) const;
+
+	/**
+	 * Check if a range of samples has no transitions (all samples identical).
+	 * Uses mip-map level 0 for fast O(range/16) checking.
+	 * @param[in] start Start sample index.
+	 * @param[in] count Number of samples to check.
+	 * @return true if all samples in the range are identical (no transitions),
+	 *         false if any transition exists or mip-map data unavailable.
+	 */
+	bool is_range_constant(uint64_t start, uint64_t count) const;
 
 	/**
 	 * Parses a logic data segment to generate a list of transitions
@@ -118,14 +129,20 @@ public:
 	void get_surrounding_edges(vector<EdgePair> &dest,
 		uint64_t origin_sample, float min_length, int sig_index);
 
+	bool find_nearest_edge_right(uint64_t origin_sample, int sig_index,
+		EdgePair &result);
+
+	bool find_nearest_edge_left(uint64_t origin_sample, int sig_index,
+		EdgePair &result);
+
 private:
 	uint64_t unpack_sample(const uint8_t *ptr) const;
 	void pack_sample(uint8_t *ptr, uint64_t value);
 
-	void reallocate_mipmap_level(MipMapLevel &m);
-
+	bool reallocate_mipmap_level(MipMapLevel &m);
+	bool wch_reallocate_mipmap_level(MipMapLevel &m, uint16_t level);
 	void append_payload_to_mipmap();
-
+	void append_payload_to_mipmap_decode();
 	uint64_t get_unpacked_sample(uint64_t index) const;
 
 	template <class T> void downsampleTmain(const T*&in, T &acc, T &prev);
@@ -139,17 +156,18 @@ private:
 
 private:
 	Logic& owner_;
-
+	uint64_t mipmapAppendLength_[ScaleStepCount];
 	struct MipMapLevel mip_map_[ScaleStepCount];
 	uint64_t last_append_sample_;
 	uint64_t last_append_accumulator_;
 	uint64_t last_append_extra_;
-
+	
 	friend struct LogicSegmentTest::Pow2;
 	friend struct LogicSegmentTest::Basic;
 	friend struct LogicSegmentTest::LargeData;
 	friend struct LogicSegmentTest::Pulses;
 	friend struct LogicSegmentTest::LongPulses;
+	uint64_t samplerate_;
 };
 
 } // namespace data

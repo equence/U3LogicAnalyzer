@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
  * Copyright (C) 2016 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -54,20 +56,13 @@ const QColor SignalBase::AnalogSignalColors[8] =
 	QColor(0x80, 0x20, 0x24)	// Red      HSV: 358 /  75 / 50
 };
 
-const QColor SignalBase::LogicSignalColors[10] =
+const QColor SignalBase::LogicSignalColors[4] =
 {
-	QColor(0x16, 0x19, 0x1A),	// Black
-	QColor(0x8F, 0x52, 0x02),	// Brown
-	QColor(0xCC, 0x00, 0x00),	// Red
-	QColor(0xF5, 0x79, 0x00),	// Orange
-	QColor(0xED, 0xD4, 0x00),	// Yellow
-	QColor(0x73, 0xD2, 0x16),	// Green
-	QColor(0x34, 0x65, 0xA4),	// Blue
-	QColor(0x75, 0x50, 0x7B),	// Violet
-	QColor(0x88, 0x8A, 0x85),	// Grey
-	QColor(0xEE, 0xEE, 0xEC),	// White
+	QColor(170, 0, 0),
+	QColor(180, 160, 50),
+	QColor(65, 105, 225),
+	QColor(50, 120, 70),
 };
-
 
 const int SignalBase::ColorBGAlpha = 8 * 256 / 100;
 const uint64_t SignalBase::ConversionBlockSize = 4096;
@@ -393,8 +388,9 @@ double SignalBase::get_samplerate() const
 		return adata->get_samplerate();
 	else {
 		shared_ptr<Logic> ldata = logic_data();
-		if (ldata)
+		if (ldata){
 			return ldata->get_samplerate();
+		}
 	}
 
 	// Default samplerate is 1 Hz
@@ -590,12 +586,7 @@ void SignalBase::restore_settings(QSettings &settings)
 		QVariant value = settings.value("color");
 
 		// Workaround for Qt QColor serialization bug on OSX
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-		bool is_qcolor = (QMetaType::Type)(value.typeId()) == QMetaType::QColor;
-#else
-		bool is_qcolor = (QMetaType::Type)(value.type()) == QMetaType::QColor;
-#endif
-		if (is_qcolor)
+		if ((QMetaType::Type)(value.type()) == QMetaType::QColor)
 			set_color(value.value<QColor>());
 		else
 			set_color(QColor::fromRgba(value.value<uint32_t>()));

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -43,11 +45,16 @@ unsigned int Logic::num_channels() const
 	return num_channels_;
 }
 
+void Logic::set_num_channels(unsigned int num_channels)
+{
+	num_channels_ = num_channels;
+}
+
 void Logic::push_segment(shared_ptr<LogicSegment> &segment)
 {
 	segments_.push_back(segment);
 
-	if ((samplerate_ == 1) && (segment->samplerate() > 1))
+	if (segment->samplerate() > 1)
 		samplerate_ = segment->samplerate();
 
 	connect(segment.get(), SIGNAL(completed()), this, SLOT(on_segment_completed()));

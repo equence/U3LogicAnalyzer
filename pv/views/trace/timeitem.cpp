@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,7 +22,7 @@
 #include "signal.hpp"
 #include "timeitem.hpp"
 #include "view.hpp"
-
+#include <unistd.h>
 namespace pv {
 namespace views {
 namespace trace {
@@ -36,7 +38,6 @@ void TimeItem::drag_by(const QPoint &delta)
 			view_.scale());
 	} else {
 		int64_t sample_num = view_.get_nearest_level_change(drag_point_ + delta);
-
 		if (sample_num > -1)
 			set_time(sample_num / view_.get_signal_under_mouse_cursor()->base()->get_samplerate());
 		else

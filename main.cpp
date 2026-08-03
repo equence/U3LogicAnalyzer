@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +27,8 @@
 #include <fstream>
 #include <getopt.h>
 #include <vector>
-
+#include <iostream>
+#include <fstream>
 #ifdef ENABLE_FLOW
 #include <gstreamermm.h>
 #include <libsigrokflow/libsigrokflow.hpp>
@@ -37,11 +40,16 @@
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMessageBox>
 #include <QSettings>
 #include <QTextStream>
 
 #include "config.h"
+
+#ifdef _WIN32
+#include <dwmapi.h>
+#endif
 
 #ifdef ENABLE_SIGNALS
 #include "signalhandler.hpp"
@@ -69,6 +77,8 @@
 #endif
 
 #ifdef _WIN32
+#include <windows.h>
+#include <cstdio>
 #include <QtPlugin>
 #ifdef QT_STATIC
 Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin)
@@ -81,6 +91,10 @@ using std::ifstream;
 using std::ofstream;
 using std::shared_ptr;
 using std::string;
+#define CH569_VID 0x1a86
+#define CH569_PID 0x8025
+#define CH32H417_VID 0x1a86
+#define CH32H417_PID 0x5537
 
 #if ENABLE_STACKTRACE
 QString stacktrace_filename;
@@ -165,19 +179,23 @@ void usage()
 		"  -s, --settings                  Load PulseView session setup from file\n"
 		"  -I, --input-format              Input format\n"
 		"  -c, --clean                     Don't restore previous sessions on startup\n"
+		"  -g, --debug                     Show debug console window (Windows only)\n"
 		"\n", PV_BIN_NAME);
 }
-
+using namespace std;
 int main(int argc, char *argv[])
 {
 	int ret = 0;
 	shared_ptr<sigrok::Context> context;
 	string open_file_format, open_setup_file, driver;
+	driver = "";
 	vector<string> open_files;
 	bool restore_sessions = true;
-	bool do_scan = true;
+	bool do_scan = false;
 	bool show_version = false;
-
+	bool debug_console = false;
+	int loglevel = -1;
+	
 #ifdef ENABLE_FLOW
 	// Initialise gstreamermm. Must be called before any other GLib stuff.
 	Gst::init();
@@ -186,14 +204,24 @@ int main(int argc, char *argv[])
 	Srf::init();
 #endif
 
+	// Enable high DPI scaling before creating QApplication
+	QApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
+	QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, true);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+	QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
+		Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+#endif
+
 	Application a(argc, argv);
+	QFont currentFont = a.font();
+	currentFont.setFamily("Microsoft YaHei");
+	a.setFont(currentFont);
 
 #ifdef ANDROID
 	srau_init_environment();
 	pv::AndroidLogHandler::install_callbacks();
 	pv::AndroidAssetReader asset_reader;
 #endif
-
 	// Parse arguments
 	while (true) {
 		static const struct option long_options[] = {
@@ -206,12 +234,13 @@ int main(int argc, char *argv[])
 			{"settings", required_argument, nullptr, 's'},
 			{"input-format", required_argument, nullptr, 'I'},
 			{"clean", no_argument, nullptr, 'c'},
+			{"debug", no_argument, nullptr, 'g'},
 			{"log-to-stdout", no_argument, nullptr, 's'},
 			{nullptr, 0, nullptr, 0}
 		};
 
 		const int c = getopt_long(argc, argv,
-			"h?VDcl:d:i:s:I:", long_options, nullptr);
+			"h?VDcl:d:i:s:I:g", long_options, nullptr);
 		if (c == -1)
 			break;
 
@@ -227,12 +256,12 @@ int main(int argc, char *argv[])
 
 		case 'l':
 		{
-			const int loglevel = atoi(optarg);
+			loglevel = atoi(optarg);
 			if (loglevel < 0 || loglevel > 5) {
 				qDebug() << "ERROR: invalid log level spec.";
+				loglevel = -1;
 				break;
 			}
-			context->set_log_level(sigrok::LogLevel::get(loglevel));
 
 #ifdef ENABLE_DECODE
 			srd_log_loglevel_set(loglevel);
@@ -269,6 +298,10 @@ int main(int argc, char *argv[])
 		case 'c':
 			restore_sessions = false;
 			break;
+
+		case 'g':
+			debug_console = true;
+			break;
 		}
 	}
 	argc -= optind;
@@ -276,6 +309,15 @@ int main(int argc, char *argv[])
 
 	for (int i = 0; i < argc; i++)
 		open_files.emplace_back(argv[i]);
+
+#ifdef _WIN32
+	if (debug_console) {
+		AllocConsole();
+		freopen("CONOUT$", "w", stdout);
+		freopen("CONOUT$", "w", stderr);
+		freopen("CONIN$", "r", stdin);
+	}
+#endif
 
 	qRegisterMetaType<uint64_t>("uint64_t");
 	qRegisterMetaType<pv::util::Timestamp>("util::Timestamp");
@@ -295,6 +337,10 @@ int main(int argc, char *argv[])
 	// Initialise libsigrok
 	context = sigrok::Context::create();
 	pv::Session::sr_context = context;
+
+	// Apply loglevel after context is created
+	if (loglevel >= 0 && loglevel <= 5)
+		context->set_log_level(sigrok::LogLevel::get(loglevel));
 
 #if ENABLE_STACKTRACE
 	QString temp_path = QStandardPaths::standardLocations(
@@ -316,7 +362,23 @@ int main(int argc, char *argv[])
 
 #ifdef ENABLE_DECODE
 		// Initialise libsigrokdecode
-		if (srd_init(nullptr) != SRD_OK) {
+		// 自动定位协议解码器目录（无需设置 SIGROKDECODE_DIR）：
+		// 依次尝试 .app 资源目录、安装前缀目录、构建树目录。
+		QString srd_path;
+		{
+			const QString app_dir = QCoreApplication::applicationDirPath();
+			const QStringList srd_candidates = {
+				app_dir + "/../Resources/decoders",
+				app_dir + "/../share/libsigrokdecode/decoders",
+				app_dir + "/../../install/share/libsigrokdecode/decoders",
+			};
+			for (const QString &cand : srd_candidates)
+				if (QFileInfo::exists(cand))
+					srd_path = cand;
+		}
+		QByteArray srd_path_ba = srd_path.toLocal8Bit();
+		if (srd_init(srd_path.isEmpty() ?
+				nullptr : srd_path_ba.constData()) != SRD_OK) {
 			qDebug() << "ERROR: libsigrokdecode init failed.";
 			break;
 		}
@@ -330,25 +392,44 @@ int main(int argc, char *argv[])
 #endif
 
 		// Create the device manager, initialise the drivers
-		pv::DeviceManager device_manager(context, driver, do_scan);
+		if (!pv::MainWindow::checkSystemRequirements()) {
+        	return 0;
+    	}
+		// pv::DeviceManager device_manager(context, driver, do_scan);
 
-		a.collect_version_info(device_manager);
+		// a.collect_version_info(device_manager);
 		if (show_version) {
 			a.print_version_info();
 		} else {
 			// Initialise the main window
-			pv::MainWindow w(device_manager);
+			// pv::MainWindow w(device_manager);
+			pv::MainWindow w;
 			w.show();
 
-			if (restore_sessions)
-				w.restore_sessions();
-
-			if (open_files.empty())
+#ifdef _WIN32
+			// Enable dark title bar on Windows 10/11
+			HWND hwnd = (HWND)w.winId();
+			BOOL useDark = TRUE;
+			DwmSetWindowAttribute(hwnd, 20,  // DWMWA_USE_IMMERSIVE_DARK_MODE
+				&useDark, sizeof(useDark));
+			// Extend frame 1px into client area to hide the white border line
+			MARGINS margins = {0, 0, 0, 1};
+			DwmExtendFrameIntoClientArea(hwnd, &margins);
+#endif
+			// if (restore_sessions){
+			// 	w.restore_sessions();
+			// }
+			if (open_files.empty()){
 				w.add_default_session();
-			else
+				w.add_default_setting();
+				if (restore_sessions){
+					w.restore_sessions();
+				}
+			}
+			else{
 				for (string& open_file : open_files)
 					w.add_session_with_file(open_file, open_file_format, open_setup_file);
-
+			}
 #ifdef ENABLE_SIGNALS
 			if (SignalHandler::prepare_signals()) {
 				SignalHandler *const handler = new SignalHandler(&w);
@@ -358,11 +439,9 @@ int main(int argc, char *argv[])
 			} else
 				qWarning() << "Could not prepare signal handler.";
 #endif
-
 			// Run the application
 			ret = a.exec();
 		}
-
 #ifndef ENABLE_STACKTRACE
 		} catch (exception& e) {
 			qDebug() << "Exception:" << e.what();

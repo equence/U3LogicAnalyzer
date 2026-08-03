@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -51,7 +53,7 @@ const char *const ChannelNames[] = {
 	"TX",
 	"RX",
 	"SDA",
-	"SCL",
+	"SCL"
 	"SCLK",
 	"MOSI",
 	"MISO",
@@ -206,7 +208,6 @@ void Signal::on_disable()
 void Signal::on_enabled_changed(bool enabled)
 {
 	(void)enabled;
-
 	if (owner_)
 		owner_->extents_changed(true, true);
 }

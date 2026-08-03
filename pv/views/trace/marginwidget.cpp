@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -48,10 +50,10 @@ void MarginWidget::show_popup(const shared_ptr<ViewItem> &item)
 {
 	pv::widgets::Popup *const p = item->create_popup(this);
 
-	if (p) {
-		connect(p, SIGNAL(closed()), this, SLOT(on_popup_closed()));
+	connect(p, SIGNAL(closed()), this, SLOT(on_popup_closed()));
+
+	if (p)
 		p->show();
-	}
 }
 
 void MarginWidget::contextMenuEvent(QContextMenuEvent *event)

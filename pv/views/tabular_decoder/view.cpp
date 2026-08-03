@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2020 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,14 +55,19 @@ namespace views {
 namespace tabular_decoder {
 
 const char* SaveTypeNames[SaveTypeCount] = {
-	"CSV, commas escaped",
-	"CSV, fields quoted"
+	// "CSV, commas escaped",
+	// "CSV, fields quoted"
+	"CSV, 逗号已转义",
+	"CSV, 字段已加引号"
 };
 
 const char* ViewModeNames[ViewModeCount] = {
-	"Show all",
-	"Show all and focus on newest",
-	"Show visible in main view"
+	// QT_TR_NOOP("Show all"),
+    // QT_TR_NOOP("Show all and focus on newest"),
+    // QT_TR_NOOP("Show visible in main view")
+	"全部显示",
+	"全部显示并锁定最新内容",
+	"只显示当前主窗口内数据的解码"
 };
 
 
@@ -124,19 +131,18 @@ QSize CustomTableView::minimumSizeHint() const
 {
 	QSize size(QTableView::sizeHint());
 
-	int width = 0;
-	for (int i = 0; i < horizontalHeader()->count(); i++)
-		if (!horizontalHeader()->isSectionHidden(i))
-			width += horizontalHeader()->sectionSize(i);
-
-	size.setWidth(width + (horizontalHeader()->count() * 1));
+	size.setWidth(10);
 
 	return size;
 }
 
 QSize CustomTableView::sizeHint() const
 {
-	return minimumSizeHint();
+	QSize size(QTableView::sizeHint());
+
+	size.setWidth(250);
+
+	return size;
 }
 
 void CustomTableView::keyPressEvent(QKeyEvent *event)
@@ -170,6 +176,7 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	// Create toolbar
 	QToolBar* toolbar = new QToolBar();
 	toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
+	toolbar->setMovable(false);
 	parent->addToolBar(toolbar);
 
 	// Populate toolbar
@@ -179,8 +186,8 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	toolbar->addWidget(save_button_);
 	toolbar->addSeparator();
 	toolbar->addWidget(view_mode_selector_);
-	toolbar->addSeparator();
-	toolbar->addWidget(hide_hidden_cb_);
+	// toolbar->addSeparator();
+	// toolbar->addWidget(hide_hidden_cb_);
 
 	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
 		this, SLOT(on_selected_decoder_changed(int)));
@@ -192,8 +199,10 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	// Configure widgets
 	decoder_selector_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
 
-	for (int i = 0; i < ViewModeCount; i++)
-		view_mode_selector_->addItem(ViewModeNames[i], QVariant::fromValue(i));
+	for (int i = 0; i < ViewModeCount; i++) {
+		QString translated = tr(ViewModeNames[i]);
+    	view_mode_selector_->addItem(translated, QVariant::fromValue(i));
+	}
 
 	hide_hidden_cb_->setText(tr("Hide Hidden Rows/Classes"));
 	hide_hidden_cb_->setChecked(true);
@@ -202,11 +211,7 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	save_action_->setText(tr("&Save..."));
 	save_action_->setIcon(QIcon::fromTheme("document-save-as",
 		QIcon(":/icons/document-save-as.png")));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	save_action_->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
-#else
 	save_action_->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_S));
-#endif
 	connect(save_action_, SIGNAL(triggered(bool)),
 		this, SLOT(on_actionSave_triggered()));
 
@@ -232,19 +237,27 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	table_view_->setSortingEnabled(true);
 	table_view_->sortByColumn(0, Qt::AscendingOrder);
 
+	table_view_->viewport()->setAttribute(Qt::WA_Hover, false);
+
+	table_view_->setShowGrid(true);
+	table_view_->setGridStyle(Qt::SolidLine);
+
 	for (uint8_t i = model_->first_hidden_column(); i < model_->columnCount(); i++)
 		table_view_->setColumnHidden(i, true);
+
+	table_view_->setColumnHidden(0, true);
+	table_view_->setColumnHidden(2, true);
 
 	const int font_height = QFontMetrics(QApplication::font()).height();
 	table_view_->verticalHeader()->setDefaultSectionSize((font_height * 5) / 4);
 	table_view_->verticalHeader()->setVisible(false);
 
+	table_view_->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
 	table_view_->horizontalHeader()->setStretchLastSection(true);
-	table_view_->horizontalHeader()->setCascadingSectionResizes(true);
 	table_view_->horizontalHeader()->setSectionsMovable(true);
 	table_view_->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
 
-	table_view_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+	table_view_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 	parent->setSizePolicy(table_view_->sizePolicy());
 
 	connect(table_view_, SIGNAL(clicked(const QModelIndex&)),
@@ -260,11 +273,13 @@ View::View(Session &session, bool is_main_view, QMainWindow *parent) :
 	session_.metadata_obj_manager()->add_observer(this);
 
 	reset_view_state();
+	hide_hidden_cb_->setVisible(false);
 }
 
 View::~View()
 {
 	session_.metadata_obj_manager()->remove_observer(this);
+	clear_decode_signals();
 }
 
 ViewType View::get_type() const
@@ -276,15 +291,44 @@ void View::reset_view_state()
 {
 	ViewBase::reset_view_state();
 
+	delayed_view_updater_.stop();
+
+	disconnect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+
 	decoder_selector_->clear();
+
+	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
 }
 
 void View::clear_decode_signals()
 {
+	for (const shared_ptr<DecodeSignal>& signal : decode_signals_) {
+		disconnect(signal.get(), SIGNAL(name_changed(const QString&)),
+			this, SLOT(on_signal_name_changed(const QString&)));
+		disconnect(signal.get(), SIGNAL(decoder_stacked(void*)),
+			this, SLOT(on_decoder_stacked(void*)));
+		disconnect(signal.get(), SIGNAL(decoder_removed(void*)),
+			this, SLOT(on_decoder_removed(void*)));
+
+		if (signal.get() == signal_) {
+			disconnect(signal.get(), SIGNAL(color_changed(QColor)));
+			disconnect(signal.get(), SIGNAL(new_annotations()));
+			disconnect(signal.get(), SIGNAL(decode_reset()));
+		}
+	}
+
+	disconnect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+
 	ViewBase::clear_decode_signals();
 
 	reset_data();
 	reset_view_state();
+
+	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
 }
 
 void View::add_decode_signal(shared_ptr<data::DecodeSignal> signal)
@@ -312,6 +356,22 @@ void View::add_decode_signal(shared_ptr<data::DecodeSignal> signal)
 
 void View::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
 {
+	disconnect(signal.get(), SIGNAL(name_changed(const QString&)),
+		this, SLOT(on_signal_name_changed(const QString&)));
+	disconnect(signal.get(), SIGNAL(decoder_stacked(void*)),
+		this, SLOT(on_decoder_stacked(void*)));
+	disconnect(signal.get(), SIGNAL(decoder_removed(void*)),
+		this, SLOT(on_decoder_removed(void*)));
+
+	if (signal.get() == signal_) {
+		disconnect(signal.get(), SIGNAL(color_changed(QColor)));
+		disconnect(signal.get(), SIGNAL(new_annotations()));
+		disconnect(signal.get(), SIGNAL(decode_reset()));
+	}
+
+	disconnect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
+
 	// Remove all decoders provided by this signal
 	for (const shared_ptr<Decoder>& dec : signal->decoder_stack()) {
 		int index = decoder_selector_->findData(QVariant::fromValue((void*)dec.get()));
@@ -327,6 +387,9 @@ void View::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
 		update_data();
 		reset_view_state();
 	}
+
+	connect(decoder_selector_, SIGNAL(currentIndexChanged(int)),
+		this, SLOT(on_selected_decoder_changed(int)));
 }
 
 void View::save_settings(QSettings &settings) const
@@ -350,6 +413,8 @@ void View::restore_settings(QSettings &settings)
 
 void View::reset_data()
 {
+	delayed_view_updater_.stop();
+
 	signal_ = nullptr;
 	decoder_ = nullptr;
 }
@@ -407,10 +472,9 @@ void View::save_data_as_csv(unsigned int save_type) const
 		out_stream << '\r' << '\n';
 
 
-		QModelIndexList selected_rows = table_view_->selectionModel()->selectedRows();
+		const int row_count = filter_proxy_model_->rowCount();
 
-		for (int i = 0; i < selected_rows.size(); i++) {
-			const int row = selected_rows.at(i).row();
+		for (int row = 0; row < row_count; row++) {
 
 			// Write out columns in visual order, not logical order
 			for (int c = 0; c < table_view_->horizontalHeader()->count(); c++) {
@@ -609,10 +673,20 @@ void View::on_actionSave_triggered(QAction* action)
 
 void View::on_table_item_clicked(const QModelIndex& index)
 {
-	(void)index;
+	// (void)index;
 
 	// Force repaint, otherwise the new selection isn't shown for some reason
 	table_view_->viewport()->update();
+	const QModelIndex src_idx = filter_proxy_model_->mapToSource(index);
+
+	const Annotation* ann = static_cast<const Annotation*>(src_idx.internalPointer());
+
+	if (!ann || !src_idx.isValid())
+		return;
+
+	shared_ptr<views::ViewBase> main_view = session_.main_view();
+
+	main_view->focus_on_range(ann->start_sample(), ann->end_sample());
 }
 
 void View::on_table_item_double_clicked(const QModelIndex& index)
@@ -620,7 +694,9 @@ void View::on_table_item_double_clicked(const QModelIndex& index)
 	const QModelIndex src_idx = filter_proxy_model_->mapToSource(index);
 
 	const Annotation* ann = static_cast<const Annotation*>(src_idx.internalPointer());
-	assert(ann);
+
+	if (!ann || !src_idx.isValid())
+		return;
 
 	shared_ptr<views::ViewBase> main_view = session_.main_view();
 
@@ -697,6 +773,16 @@ void View::on_metadata_object_changed(MetadataObject* obj,
 			table_view_->viewport()->update();
 		}
 	}
+}
+
+void View::capture_state_updated(int state)
+{
+	if (state == Session::Running) {
+		delayed_view_updater_.stop();
+		model_->set_signal_and_segment(signal_, current_segment_);
+	}
+
+	ViewBase::capture_state_updated(state);
 }
 
 void View::perform_delayed_view_update()

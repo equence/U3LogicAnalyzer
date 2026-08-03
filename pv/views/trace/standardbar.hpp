@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2016 Soeren Apel <soeren@apelpie.net>
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,9 +32,10 @@
 #include <QWidget>
 
 #include <pv/session.hpp>
-
+#include <thread>
 #include "trace.hpp"
-
+#include <pthread.h>
+#include <unistd.h>
 namespace pv {
 
 class MainWindow;
@@ -53,13 +56,14 @@ class StandardBar : public QToolBar
 public:
 	StandardBar(Session &session, QWidget *parent,
 		trace::View *view, bool add_default_widgets = true);
-
+	~StandardBar();
 	Session &session() const;
-
+	trace::View * view();
 	QAction* action_view_zoom_in() const;
 	QAction* action_view_zoom_out() const;
 	QAction* action_view_zoom_fit() const;
 	QAction* action_view_show_cursors() const;
+	bool ThreadRunning = false;
 
 protected:
 	virtual void add_toolbar_widgets();
@@ -68,12 +72,11 @@ protected:
 
 	Session &session_;
 	trace::View *view_;
-
 	QAction *const action_view_zoom_in_;
 	QAction *const action_view_zoom_out_;
 	QAction *const action_view_zoom_fit_;
 	QAction *const action_view_show_cursors_;
-
+	QToolButton *const show_cursors_;
 	QToolButton *segment_display_mode_selector_;
 	QAction *const action_sdm_last_;
 	QAction *const action_sdm_last_complete_;
@@ -83,6 +86,7 @@ protected:
 
 Q_SIGNALS:
 	void segment_selected(int segment_id);
+	void notify_session_info();
 
 protected Q_SLOTS:
 	void on_actionViewZoomIn_triggered();

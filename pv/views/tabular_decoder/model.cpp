@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2020 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -61,7 +63,7 @@ AnnotationCollectionModel::AnnotationCollectionModel(QObject* parent) :
 	header_data_.emplace_back(tr("Value"));     i++; // Column #5
 
 	first_hidden_column_ = i;
-	header_data_.emplace_back("End Sample");         // Column #6, hidden
+	header_data_.emplace_back(tr("End Sample"));         // Column #6, hidden
 }
 
 int AnnotationCollectionModel::get_hierarchy_level(const Annotation* ann) const
@@ -105,45 +107,14 @@ QVariant AnnotationCollectionModel::data(const QModelIndex& index, int role) con
 	const Annotation* ann =
 		static_cast<const Annotation*>(index.internalPointer());
 
-	if ((role == Qt::DisplayRole) || (role == Qt::ToolTipRole))
+	if (role == Qt::DisplayRole)
 		return data_from_ann(ann, index.column());
 
-	if (role == Qt::ForegroundRole) {
-		if (index.column() >= get_hierarchy_level(ann)) {
-			// Invert the text color if this cell is highlighted
-			const bool must_highlight = (highlight_sample_num_ > 0) &&
-				((int64_t)ann->start_sample() <= highlight_sample_num_) &&
-				((int64_t)ann->end_sample() >= highlight_sample_num_);
-
-			if (must_highlight) {
-				if (GlobalSettings::current_theme_is_dark())
-					return QApplication::palette().brush(QPalette::Window);
-				else
-					return QApplication::palette().brush(QPalette::WindowText);
-			}
-		}
-
+	if (role == Qt::ForegroundRole)
 		return QApplication::palette().brush(QPalette::WindowText);
-	}
 
-	if (role == Qt::BackgroundRole) {
-		// Only use custom cell background color if column index reached the hierarchy level
-		if (index.column() >= get_hierarchy_level(ann)) {
-
-			QColor color;
-			const bool must_highlight = (highlight_sample_num_ > 0) &&
-				((int64_t)ann->start_sample() <= highlight_sample_num_) &&
-				((int64_t)ann->end_sample() >= highlight_sample_num_);
-
-			if (must_highlight)
-				color = ann->color();
-			else
-				color = GlobalSettings::current_theme_is_dark() ?
-					ann->dark_color() : ann->bright_color();
-
-			return QBrush(color);
-		}
-	}
+	if (role == Qt::BackgroundRole)
+		return QVariant();
 
 	return QVariant();
 }

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2017 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,27 +19,26 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "config.h"
-
 #include <cstring>
 #include <forward_list>
 #include <limits>
-
+#include <unistd.h>
 #include <QDebug>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#include <QRegularExpression>
-#endif
-
+#include <QMessageBox>
 #include "logic.hpp"
 #include "logicsegment.hpp"
 #include "decodesignal.hpp"
 #include "signaldata.hpp"
-
+#include <time.h>
 #include <pv/data/decode/decoder.hpp>
 #include <pv/data/decode/row.hpp>
 #include <pv/globalsettings.hpp>
 #include <pv/session.hpp>
-
+#include <fstream>
+#include <iostream>
+#include <QTime>
+#include <chrono>
+#include <cinttypes>
 using std::dynamic_pointer_cast;
 using std::lock_guard;
 using std::make_shared;
@@ -47,14 +48,14 @@ using std::shared_ptr;
 using std::unique_lock;
 using pv::data::decode::AnnotationClass;
 using pv::data::decode::DecodeChannel;
-
+using namespace std;
 namespace pv {
 namespace data {
 
 const double DecodeSignal::DecodeMargin = 1.0;
 const double DecodeSignal::DecodeThreshold = 0.2;
-const int64_t DecodeSignal::DecodeChunkLength = 256 * 1024;
-
+// const uint64_t DecodeSignal::DecodeChunkLength = 50 * 1024 * 1024;
+using std::bad_alloc;
 
 DecodeSignal::DecodeSignal(pv::Session &session) :
 	SignalBase(nullptr, SignalBase::DecodeChannel),
@@ -64,13 +65,23 @@ DecodeSignal::DecodeSignal(pv::Session &session) :
 	stack_config_changed_(true),
 	current_segment_id_(0)
 {
+
+	DecodeChunkLength = 50 * 1024 * 1024;
+
 	connect(&session_, SIGNAL(capture_state_changed(int)),
 		this, SLOT(on_capture_state_changed(int)));
+	decode_chunk_ = NULL;
+	src_buffer_ = NULL;
+	src_buffer_unit_size_ = 0;
 }
 
 DecodeSignal::~DecodeSignal()
 {
 	reset_decode(true);
+	if (decode_chunk_ != NULL)
+		delete[] decode_chunk_;
+	if (src_buffer_ != NULL)
+		delete[] src_buffer_;
 }
 
 void DecodeSignal::set_name(QString name)
@@ -95,7 +106,7 @@ const vector< shared_ptr<Decoder> >& DecodeSignal::decoder_stack() const
 void DecodeSignal::stack_decoder(const srd_decoder *decoder, bool restart_decode)
 {
 	assert(decoder);
-
+	
 	// Set name if this decoder is the first in the list or the name is unchanged
 	const srd_decoder* prev_dec = stack_.empty() ? nullptr : stack_.back()->get_srd_decoder();
 	const QString prev_dec_name = prev_dec ? QString::fromUtf8(prev_dec->name) : QString();
@@ -139,6 +150,18 @@ void DecodeSignal::remove_decoder(int index)
 	// Delete the element
 	stack_.erase(iter);
 
+	// Restore original signal names for both output and input signals
+	for (shared_ptr<SignalBase> s : output_signals_) {
+		if (!s->internal_name().isEmpty())
+			s->set_name(s->internal_name());
+	}
+	// Also restore names of assigned input signals (decoder channels → D0, D1...)
+	for (decode::DecodeChannel& ch : channels_) {
+		if (ch.assigned_signal && !ch.assigned_signal->internal_name().isEmpty())
+			std::const_pointer_cast<SignalBase>(ch.assigned_signal)->set_name(
+				ch.assigned_signal->internal_name());
+	}
+
 	// Update channels and decoded data
 	stack_config_changed_ = true;
 	update_channel_list();
@@ -159,7 +182,6 @@ bool DecodeSignal::toggle_decoder_visibility(int index)
 		state = !dec->visible();
 		dec->set_visible(state);
 	}
-
 	return state;
 }
 
@@ -193,13 +215,11 @@ void DecodeSignal::reset_decode(bool shutting_down)
 
 	logic_mux_data_.reset();
 	logic_mux_data_invalid_ = true;
-
 	if (!error_message_.isEmpty()) {
 		error_message_.clear();
 		// TODO Emulate noquote()
 		qDebug().nospace() << name() << ": Error cleared";
 	}
-
 	decode_reset();
 }
 
@@ -245,7 +265,7 @@ void DecodeSignal::begin_decode()
 				"have not been specified"));
 			return;
 		}
-
+	
 	// Free the logic data and its segment(s) if it needs to be updated
 	if (logic_mux_data_invalid_)
 		logic_mux_data_.reset();
@@ -266,6 +286,7 @@ void DecodeSignal::begin_decode()
 	// Decode the muxed logic data
 	decode_interrupt_ = false;
 	decode_thread_ = std::thread(&DecodeSignal::decode_proc, this);
+	// allow_skip_ = true;
 }
 
 void DecodeSignal::pause_decode()
@@ -299,8 +320,21 @@ void DecodeSignal::auto_assign_signals(const shared_ptr<Decoder> dec)
 	// Disconnect all input signal notifications so we don't have duplicate connections
 	disconnect_input_notifiers();
 
+	// Sort channels: non-RX first (e.g. UART: TX→D0, RX→D1)
+	vector<decode::DecodeChannel*> sorted_channels;
+	for (decode::DecodeChannel& ch : channels_)
+		sorted_channels.push_back(&ch);
+	sort(sorted_channels.begin(), sorted_channels.end(),
+		[](const decode::DecodeChannel* a, const decode::DecodeChannel* b) {
+			bool a_is_rx = a->name.toLower().contains("rx");
+			bool b_is_rx = b->name.toLower().contains("rx");
+			if (a_is_rx != b_is_rx) return b_is_rx;
+			return a->id < b->id;
+		});
+
 	// Try to auto-select channels that don't have signals assigned yet
-	for (decode::DecodeChannel& ch : channels_) {
+	for (decode::DecodeChannel* ch_ptr : sorted_channels) {
+		decode::DecodeChannel& ch = *ch_ptr;
 		// If a decoder is given, auto-assign only its channels
 		if (dec && (ch.decoder_ != dec))
 			continue;
@@ -309,11 +343,7 @@ void DecodeSignal::auto_assign_signals(const shared_ptr<Decoder> dec)
 			continue;
 
 		QString ch_name = ch.name.toLower();
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-		ch_name = ch_name.replace(QRegularExpression("[-_.]"), " ");
-#else
 		ch_name = ch_name.replace(QRegExp("[-_.]"), " ");
-#endif
 
 		shared_ptr<data::SignalBase> match;
 		for (const shared_ptr<data::SignalBase>& s : session_.signalbases()) {
@@ -321,11 +351,7 @@ void DecodeSignal::auto_assign_signals(const shared_ptr<Decoder> dec)
 				continue;
 
 			QString s_name = s->name().toLower();
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-			s_name = s_name.replace(QRegularExpression("[-_.]"), " ");
-#else
 			s_name = s_name.replace(QRegExp("[-_.]"), " ");
-#endif
 
 			if (s->logic_data() &&
 				((ch_name.contains(s_name)) || (s_name.contains(ch_name)))) {
@@ -382,6 +408,26 @@ void DecodeSignal::assign_signal(const uint16_t channel_id, shared_ptr<const Sig
 	commit_decoder_channels();
 	channels_updated();
 	begin_decode();
+}
+
+void DecodeSignal::assign_signal_no_decode(const uint16_t channel_id, shared_ptr<const SignalBase> signal)
+{
+	// Disconnect all input signal notifications so we don't have duplicate connections
+	disconnect_input_notifiers();
+
+	for (decode::DecodeChannel& ch : channels_)
+		if (ch.id == channel_id) {
+			ch.assigned_signal = signal;
+			logic_mux_data_invalid_ = true;
+		}
+
+	// Receive notifications when new sample data is available
+	connect_input_notifiers();
+
+	stack_config_changed_ = true;
+	commit_decoder_channels();
+	channels_updated();
+	// Note: begin_decode() is not called here, it will be called when data arrives
 }
 
 int DecodeSignal::get_assigned_signal_count() const
@@ -758,11 +804,7 @@ void DecodeSignal::save_settings(QSettings &settings) const
 	for (const shared_ptr<Decoder>& decoder : stack_) {
 		settings.beginGroup("decoder" + QString::number(decoder_idx++));
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-		settings.setValue("id", (const char *)decoder->get_srd_decoder()->id);
-#else
 		settings.setValue("id", decoder->get_srd_decoder()->id);
-#endif
 		settings.setValue("visible", decoder->visible());
 
 		// Save decoder options
@@ -862,6 +904,7 @@ void DecodeSignal::restore_settings(QSettings &settings)
 				for (int i = 0; i < options; i++) {
 					settings.beginGroup("option" + QString::number(i));
 					QString name = settings.value("name").toString();
+					qDebug() << "Setting option : name ==  "  << name;
 					GVariant *value = GlobalSettings::restore_gvariant(settings);
 					decoder->set_option(name.toUtf8(), value);
 					settings.endGroup();
@@ -887,11 +930,9 @@ void DecodeSignal::restore_settings(QSettings &settings)
 					settings.endGroup();
 					i++;
 				}
-
 				break;
 			}
 		}
-
 		settings.endGroup();
 		channels_updated();
 	}
@@ -1002,8 +1043,58 @@ double DecodeSignal::get_input_samplerate(uint32_t segment_id) const
 			}
 			break;
 		}
-
 	return samplerate;
+}
+
+uint16_t DecodeSignal::get_input_channel_number(uint32_t segment_id)
+{
+	uint16_t channel_num = 0;
+
+	for (const decode::DecodeChannel& ch : channels_)
+		if (ch.assigned_signal) {
+			const shared_ptr<Logic> logic_data = ch.assigned_signal->logic_data();
+			if (!logic_data || logic_data->logic_segments().empty())
+				continue;
+
+			try {
+				const shared_ptr<const LogicSegment> segment =
+					logic_data->logic_segments().at(segment_id)->get_shared_ptr();
+				if (segment){
+					// channel_num = (segment->channel_num_ < 8) ? 8 : segment->channel_num_;
+					channel_num = segment->channel_num_;
+				}
+			} catch (out_of_range&) {
+				// Do nothing
+			}
+			break;
+		}
+
+	return channel_num;
+}
+
+uint16_t DecodeSignal::get_input_unit_size(uint32_t segment_id)
+{
+	uint16_t unit_size = 0;
+
+	for (const decode::DecodeChannel& ch : channels_)
+		if (ch.assigned_signal) {
+			const shared_ptr<Logic> logic_data = ch.assigned_signal->logic_data();
+			if (!logic_data || logic_data->logic_segments().empty())
+				continue;
+
+			try {
+				const shared_ptr<const LogicSegment> segment =
+					logic_data->logic_segments().at(segment_id)->get_shared_ptr();
+				if (segment){
+					unit_size = segment->unit_size();
+				}
+			} catch (out_of_range&) {
+				// Do nothing
+			}
+			break;
+		}
+
+	return unit_size;
 }
 
 Decoder* DecodeSignal::get_decoder_by_instance(const srd_decoder *const srd_dec)
@@ -1092,7 +1183,6 @@ void DecodeSignal::update_channel_list()
 		}
 
 	}
-
 	channels_updated();
 }
 
@@ -1114,6 +1204,46 @@ void DecodeSignal::commit_decoder_channels()
 	for (decode::DecodeChannel& ch : channels_)
 		if (ch.assigned_signal)
 			ch.bit_id = id++;
+
+	// Rename assigned signals to match decoder channel names (e.g. D0→TX, D1→RX)
+	for (decode::DecodeChannel& ch : channels_) {
+		if (ch.assigned_signal && !ch.name.isEmpty()) {
+			// Save original name before overwriting, so we can restore it later
+			auto s = std::const_pointer_cast<SignalBase>(ch.assigned_signal);
+			if (s->internal_name().isEmpty())
+				s->set_internal_name(s->name());
+			QString signal_name = QString::fromUtf8(ch.name.toLatin1().constData());
+			s->set_name(signal_name);
+		}
+	}
+}
+
+bool channel_8_switch_4(uint8_t* pSource, uint64_t lBufferSize, uint8_t* pDest)
+{
+	if (!pDest || !pSource)
+		return false;
+	uint64_t index = 0;
+	for (size_t i = 0; i < lBufferSize;) {
+		pDest[index] = pSource[i++];
+		pDest[index] = pDest[index] | (pSource[i++] << 4);
+		index++;
+	}
+	return true;
+}
+
+bool channel_8_switch_2(uint8_t* pSource, uint64_t lBufferSize, uint8_t* pDest)
+{
+	if (!pDest || !pSource)
+		return false;
+	uint64_t index = 0;
+	for (size_t i = 0; i < lBufferSize;) {
+		pDest[index] = pSource[i++];
+		pDest[index] = pDest[index] | (pSource[i++] << 2);
+		pDest[index] = pDest[index] | (pSource[i++] << 4);
+		pDest[index] = pDest[index] | (pSource[i++] << 6);
+		index++;
+	}
+	return true;
 }
 
 void DecodeSignal::mux_logic_samples(uint32_t segment_id, const int64_t start, const int64_t end)
@@ -1121,16 +1251,17 @@ void DecodeSignal::mux_logic_samples(uint32_t segment_id, const int64_t start, c
 	// Enforce end to be greater than start
 	if (end <= start)
 		return;
-
 	// Fetch the channel segments and their data
 	vector<shared_ptr<const LogicSegment> > segments;
 	vector<const uint8_t*> signal_data;
 	vector<uint8_t> signal_in_bytepos;
 	vector<uint8_t> signal_in_bitpos;
-
+	uint8_t* output_zoom = NULL;
 	for (decode::DecodeChannel& ch : channels_)
 		if (ch.assigned_signal) {
 			const shared_ptr<Logic> logic_data = ch.assigned_signal->logic_data();
+			if (!logic_data || logic_data->logic_segments().empty())
+				continue;
 
 			shared_ptr<const LogicSegment> segment;
 			if (segment_id < logic_data->logic_segments().size()) {
@@ -1147,7 +1278,14 @@ void DecodeSignal::mux_logic_samples(uint32_t segment_id, const int64_t start, c
 
 			segments.push_back(segment);
 
-			uint8_t* data = new uint8_t[(end - start) * segment->unit_size()];
+			const uint64_t unit_sz = segment->unit_size();
+			if (unit_sz == 0)
+				return;
+
+			uint8_t* data = new uint8_t[(end - start) * unit_sz];
+			if (data == NULL) {
+				return;
+			}
 			segment->get_samples(start, end, data);
 			signal_data.push_back(data);
 
@@ -1186,9 +1324,9 @@ void DecodeSignal::mux_logic_samples(uint32_t segment_id, const int64_t start, c
 			const uint8_t in_sample = 1 &
 				((signal_data[i][in_sample_pos + signal_in_bytepos[i]]) >> (signal_in_bitpos[i]));
 
-			const uint8_t out_sample = output[out_sample_pos + bytepos];
+			// const uint8_t out_sample = output[out_sample_pos + bytepos];
 
-			output[out_sample_pos + bytepos] = out_sample | (in_sample << bitpos);
+			output[out_sample_pos + bytepos] = output[out_sample_pos + bytepos] | (in_sample << bitpos);
 
 			bitpos++;
 			if (bitpos > 7) {
@@ -1197,10 +1335,26 @@ void DecodeSignal::mux_logic_samples(uint32_t segment_id, const int64_t start, c
 			}
 		}
 	}
-
-	output_segment->append_payload(output, (end - start) * output_segment->unit_size());
+	output_zoom = new uint8_t[(uint64_t)(((end - start) / (double)output_segment->unit_size_temp) + 7)];
+	if (output_zoom == NULL) {
+		return;
+	}
+	if (output_segment->channel_num_ == 4){	
+		if (channel_8_switch_4(output, end - start, output_zoom) == false){
+			return;
+		}
+	}else if (output_segment->channel_num_ == 2){
+		if (channel_8_switch_2(output, end - start, output_zoom) == false){
+			return;
+		}
+	}
+	if (output_segment->channel_num_ < 8){
+		output_segment->append_payload(output_zoom, (uint64_t)((end - start) / (double)output_segment->unit_size_temp));
+	} else{
+		output_segment->append_payload(output, (end - start) * output_segment->unit_size());
+	}
 	delete[] output;
-
+	delete[] output_zoom;
 	for (const uint8_t* data : signal_data)
 		delete[] data;
 }
@@ -1223,6 +1377,8 @@ void DecodeSignal::logic_mux_proc()
 	assert(logic_mux_data_);
 
 	uint32_t segment_id = 0;
+	auto mux_start = std::chrono::steady_clock::now();
+	uint64_t mux_total_samples = 0;
 
 	// Create initial logic mux segment
 	shared_ptr<LogicSegment> output_segment =
@@ -1230,7 +1386,8 @@ void DecodeSignal::logic_mux_proc()
 	logic_mux_data_->push_segment(output_segment);
 
 	output_segment->set_samplerate(get_input_samplerate(0));
-
+	output_segment->set_channel_numner(get_input_channel_number(0));
+	// output_segment->set_unit_size(get_input_unit_size(0));
 	// Logic mux data is being updated
 	logic_mux_data_invalid_ = false;
 
@@ -1253,10 +1410,11 @@ void DecodeSignal::logic_mux_proc()
 					const uint64_t start_sample = output_sample_count + processed_samples;
 					const uint64_t sample_count =
 						min(samples_to_process - processed_samples,	chunk_sample_count);
-
+					auto ms_t0 = std::chrono::steady_clock::now();
 					mux_logic_samples(segment_id, start_sample, start_sample + sample_count);
+					auto ms_t1 = std::chrono::steady_clock::now();
+					mux_total_samples += sample_count;
 					processed_samples += sample_count;
-
 					// ...and process the newly muxed logic data
 					decode_input_cond_.notify_one();
 				} while (!logic_mux_interrupt_ && (processed_samples < samples_to_process));
@@ -1284,8 +1442,12 @@ void DecodeSignal::logic_mux_proc()
 					output_segment->set_samplerate(get_input_samplerate(segment_id));
 				} else {
 					// Wait for more input data if we're processing the currently last segment
-					unique_lock<mutex> logic_mux_lock(logic_mux_mutex_);
-					logic_mux_cond_.wait(logic_mux_lock);
+					{
+						auto mux_end = std::chrono::steady_clock::now();
+						double mux_ms = std::chrono::duration<double, std::milli>(mux_end - mux_start).count();
+						// fprintf(stderr, "MUX_TOTAL: time=%.1fms samples=%lu\n", mux_ms, (unsigned long)mux_total_samples);
+					}
+					return;
 				}
 			} else {
 				// Input segments aren't all complete yet but samples_to_process is 0, wait for more input data
@@ -1300,48 +1462,273 @@ void DecodeSignal::decode_data(
 	const int64_t abs_start_samplenum, const int64_t sample_count,
 	const shared_ptr<const LogicSegment> input_segment)
 {
-	const int64_t unit_size = input_segment->unit_size();
-	const int64_t chunk_sample_count = DecodeChunkLength / unit_size;
+	uint64_t start_pos = 0;
+	uint64_t end_pos = input_segment->get_sample_count();
 
-	for (int64_t i = abs_start_samplenum;
-		!decode_interrupt_ && (i < (abs_start_samplenum + sample_count));
-		i += chunk_sample_count) {
+	struct DecodeStats {
+		uint64_t total_chunks = 0;
+		uint64_t srd_session_send_calls = 0;
+		uint64_t mipmap_skip_chunks = 0;
+		double time_get_samples = 0;
+		double time_inline_mux = 0;
+		double time_srd_session_send = 0;
+		double time_new_annotations = 0;
+		double time_progress_lock = 0;
+		double time_mipmap_check = 0;
+	};
+	DecodeStats stats;
+	static const int stats_print_interval = 5000;
+	auto print_stats = [](const DecodeStats& s, bool final_print) {
+		//fprintf(stderr, "DECODE_STAT[%s chunks=%" PRIu64 "]: "
+			//"srd_send=%" PRIu64 " mmap_skip=%" PRIu64 "\n"
+			//"  TIMING: get_samples=%.1fms inline_mux=%.1fms srd_send=%.1fms "
+			//"new_ann=%.1fms prog_lock=%.1fms mmap_check=%.1fms\n",
+			//final_print ? "FINAL" : "progress",
+			//s.total_chunks, s.srd_session_send_calls, s.mipmap_skip_chunks,
+			//s.time_get_samples, s.time_inline_mux, s.time_srd_session_send,
+			//s.time_new_annotations, s.time_progress_lock, s.time_mipmap_check);
+	};
 
-		const int64_t chunk_end = min(i + chunk_sample_count,
-			abs_start_samplenum + sample_count);
+	static const int64_t DecodeChunkSamples = 4 * 1024 * 1024;
 
+
+	try {
+		if (end_decode_pos_ == 0) {
+			end_pos = input_segment->get_sample_count();
+		} else {
+			end_pos = end_decode_pos_;
+		}
+		if (start_pos > end_pos) {
+			std::swap(start_pos, end_pos);
+		}
+		end_pos = min(input_segment->get_sample_count(), end_pos);
+
+		struct DirectChMap {
+			int src_byte_off;   // byte offset in source sample word
+			int src_bit_off;    // bit offset within that byte
+			int dst_bit_pos;    // bit position in decode chunk (= bit_id)
+			int dec_ch_idx;     // decoder channel index (for constant_mask)
+		};
+		vector<DirectChMap> ch_map;
+		int src_unit_size = 0;
+		int dst_unit_size = 0;
 		{
-			lock_guard<mutex> lock(output_mutex_);
-			// Update the sample count showing the samples including currently processed ones
-			segments_.at(current_segment_id_).samples_decoded_incl = chunk_end;
+			ch_map.clear();
+			int max_dst_bit = 0;
+			for (const decode::DecodeChannel& ch : channels_) {
+				if (!ch.assigned_signal) continue;
+				DirectChMap m;
+				int src_bit_idx = ch.assigned_signal->logic_bit_index();
+				m.src_byte_off = src_bit_idx / 8;
+				m.src_bit_off = src_bit_idx % 8;
+				m.dst_bit_pos = ch.bit_id;
+				m.dec_ch_idx = ch.pdch_->order;
+				ch_map.push_back(m);
+				if (m.dst_bit_pos + 1 > max_dst_bit) max_dst_bit = m.dst_bit_pos + 1;
+			}
+			src_unit_size = input_segment->unit_size();
+			dst_unit_size = (max_dst_bit + 7) / 8;
+			//fprintf(stderr, "DIRECT_MUX: src_unit_size=%d dst_unit_size=%d ch_map_size=%zu\n",
+				//src_unit_size, dst_unit_size, ch_map.size());
+			//for (size_t ci = 0; ci < ch_map.size(); ci++) {
+				//fprintf(stderr, "  ch[%zu]: src_byte=%d src_bit=%d -> dst_bit=%d\n",
+					//ci, ch_map[ci].src_byte_off, ch_map[ci].src_bit_off, ch_map[ci].dst_bit_pos);
+			//}
 		}
 
-		int64_t data_size = (chunk_end - i) * unit_size;
-		uint8_t* chunk = new uint8_t[data_size];
-		input_segment->get_samples(i, chunk_end, chunk);
-
-		if (srd_session_send(srd_session_, i, chunk_end, chunk,
-				data_size, unit_size) != SRD_OK) {
-			set_error_message(tr("Decoder reported an error"));
-			decode_interrupt_ = true;
+		// Allocate source buffer for reading raw LogicSegment data
+				if (decode_chunk_ == NULL) {
+			decode_chunk_ = new uint8_t[(110 * 1024 * 1024) + 7];
+			decode_chunk_tmp_ = decode_chunk_ + (uint64_t)(((110 * 1024 * 1024) + 7) / 2.0);
+		}
+		// src_buffer for raw data from original LogicSegment (per-instance member)
+		if (src_buffer_ == NULL || src_buffer_unit_size_ != src_unit_size) {
+			if (src_buffer_) delete[] src_buffer_;
+			src_buffer_ = new uint8_t[DecodeChunkSamples * src_unit_size + 7];
+			src_buffer_unit_size_ = src_unit_size;
 		}
 
-		delete[] chunk;
+		srd_decoder_inst *base_di = stack_[0]->get_decoder_inst();
 
-		{
-			lock_guard<mutex> lock(output_mutex_);
-			// Now that all samples are processed, the exclusive sample count catches up
-			segments_.at(current_segment_id_).samples_decoded_excl = chunk_end;
+		// === Mip-map skip state (persists across chunks) ===
+		// Runtime switch for optimization (easy to disable for debugging)
+		bool enable_mipmap_skip = true;
+		uint64_t prev_constant_mask = 0;
+		uint64_t prev_constant_vals = 0;
+		bool prev_chunk_all_constant = false;
+		// Bitmask of all decoder channels present in ch_map
+		uint64_t all_channels_mask = 0;
+		for (size_t ci = 0; ci < ch_map.size(); ci++) {
+			all_channels_mask |= (1ULL << ch_map[ci].dec_ch_idx);
 		}
 
-		// Notify the frontend that we processed some data and
-		// possibly have new annotations as well
-		new_annotations();
+		for (int64_t i = abs_start_samplenum;
+			!decode_interrupt_ && (i < (abs_start_samplenum + sample_count));
+			i += DecodeChunkSamples) {
 
-		if (decode_paused_) {
-			unique_lock<mutex> pause_wait_lock(decode_pause_mutex_);
-			decode_pause_cond_.wait(pause_wait_lock);
+			const int64_t chunk_end = min(i + DecodeChunkSamples,
+				abs_start_samplenum + sample_count);
+			const int64_t chunk_samples = chunk_end - i;
+
+			stats.total_chunks++;
+
+			if (enable_mipmap_skip && prev_chunk_all_constant && all_channels_mask != 0) {
+				auto t_skip0 = chrono::steady_clock::now();
+				bool range_constant = input_segment->is_range_constant(i, chunk_samples);
+				auto t_skip1 = chrono::steady_clock::now();
+				stats.time_mipmap_check += chrono::duration<double, milli>(t_skip1 - t_skip0).count();
+
+				if (range_constant) {
+					uint8_t first_sample_buf[8];
+					input_segment->get_samples(i, i + 1, first_sample_buf);
+
+					bool values_match = true;
+					for (size_t ci = 0; ci < ch_map.size(); ci++) {
+						const DirectChMap& m = ch_map[ci];
+						if (!(prev_constant_mask & (1ULL << m.dec_ch_idx))) continue;
+						uint8_t bit_val = (first_sample_buf[m.src_byte_off] >> m.src_bit_off) & 1;
+						uint8_t prev_val = (prev_constant_vals >> m.dec_ch_idx) & 1;
+						if (bit_val != prev_val) { values_match = false; break; }
+					}
+
+					if (values_match) {
+						data_chunk_send_ = decode_chunk_;
+						int64_t data_size = chunk_samples * dst_unit_size;
+						auto t_srd0 = chrono::steady_clock::now();
+						int srd_ret = srd_session_send(srd_session_, i, chunk_end,
+							data_chunk_send_, data_size, dst_unit_size,
+							prev_constant_mask, prev_constant_vals);
+						auto t_srd1 = chrono::steady_clock::now();
+						stats.srd_session_send_calls++;
+						stats.time_srd_session_send += chrono::duration<double, milli>(t_srd1 - t_srd0).count();
+						stats.mipmap_skip_chunks++;
+
+						if (srd_ret != SRD_OK && srd_ret != SRD_CHUNK_SKIPPED) {
+							set_error_message(tr("Decoder reported an error"));
+							decode_interrupt_ = true;
+						}
+
+						if (stats.mipmap_skip_chunks % 100 == 0 || chunk_end >= (int64_t)(abs_start_samplenum + sample_count)) {
+							lock_guard<mutex> lock(output_mutex_);
+							segments_.at(current_segment_id_).samples_decoded_incl = chunk_end;
+							segments_.at(current_segment_id_).samples_decoded_excl = chunk_end;
+						}
+
+						{
+							new_annotations();
+						}
+
+						continue;
+					}
+					prev_chunk_all_constant = false;
+				} else {
+					// Range has edges - need to re-mux
+					prev_chunk_all_constant = false;
+				}
+			}
+
+			auto t_get0 = chrono::steady_clock::now();
+			input_segment->get_samples(i, chunk_end, src_buffer_);
+			auto t_get1 = chrono::steady_clock::now();
+						stats.time_get_samples += chrono::duration<double, milli>(t_get1 - t_get0).count();
+
+			auto t_mux0 = chrono::steady_clock::now();
+			uint64_t constant_mask = 0, constant_vals = 0;
+
+			uint8_t first_bits[64];
+			bool is_constant[64];
+			memset(is_constant, true, sizeof(is_constant));
+			memset(first_bits, 0, sizeof(first_bits));
+
+			for (int64_t s = 0; s < chunk_samples; s++) {
+				const uint8_t* src = src_buffer_ + s * src_unit_size;
+				uint8_t dst_word[8] = {0};
+
+				for (size_t ci = 0; ci < ch_map.size(); ci++) {
+					const DirectChMap& m = ch_map[ci];
+					uint8_t bit_val = (src[m.src_byte_off] >> m.src_bit_off) & 1;
+					dst_word[m.dst_bit_pos / 8] |= (bit_val << (m.dst_bit_pos % 8));
+
+					if (s == 0) {
+						first_bits[m.dst_bit_pos] = bit_val;
+					} else if (is_constant[m.dst_bit_pos] && bit_val != first_bits[m.dst_bit_pos]) {
+						is_constant[m.dst_bit_pos] = false;
+					}
+				}
+
+				for (int b = 0; b < dst_unit_size; b++) {
+					decode_chunk_[s * dst_unit_size + b] = dst_word[b];
+				}
+			}
+
+			for (size_t ci = 0; ci < ch_map.size(); ci++) {
+				const DirectChMap& m = ch_map[ci];
+				if (is_constant[m.dst_bit_pos]) {
+					constant_mask |= (1ULL << m.dec_ch_idx);
+					if (first_bits[m.dst_bit_pos])
+						constant_vals |= (1ULL << m.dec_ch_idx);
+				}
+			}
+
+			prev_constant_mask = constant_mask;
+			prev_constant_vals = constant_vals;
+			prev_chunk_all_constant = (constant_mask == all_channels_mask);
+
+			auto t_mux1 = chrono::steady_clock::now();
+			stats.time_inline_mux += chrono::duration<double, milli>(t_mux1 - t_mux0).count();
+
+			data_chunk_send_ = decode_chunk_;
+			int64_t data_size = chunk_samples * dst_unit_size;
+
+			auto t_srd0 = chrono::steady_clock::now();
+			int srd_ret = srd_session_send(srd_session_, i, chunk_end,
+				data_chunk_send_, data_size, dst_unit_size,
+				constant_mask, constant_vals);
+			auto t_srd1 = chrono::steady_clock::now();
+			stats.srd_session_send_calls++;
+			stats.time_srd_session_send += chrono::duration<double, milli>(t_srd1 - t_srd0).count();
+
+			if (srd_ret != SRD_OK && srd_ret != SRD_CHUNK_SKIPPED) {
+				set_error_message(tr("Decoder reported an error"));
+				decode_interrupt_ = true;
+			}
+
+			{
+				auto t0 = chrono::steady_clock::now();
+				lock_guard<mutex> lock(output_mutex_);
+				segments_.at(current_segment_id_).samples_decoded_incl = chunk_end;
+				segments_.at(current_segment_id_).samples_decoded_excl = chunk_end;
+				auto t1 = chrono::steady_clock::now();
+				
+				stats.time_progress_lock += chrono::duration<double, milli>(t1 - t0).count();
+			}
+
+			{
+				auto t0 = chrono::steady_clock::now();
+				new_annotations();
+				auto t1 = chrono::steady_clock::now();
+				
+				stats.time_new_annotations += chrono::duration<double, milli>(t1 - t0).count();
+			}
+
+			if (decode_paused_) {
+				unique_lock<mutex> pause_wait_lock(decode_pause_mutex_);
+				decode_pause_cond_.wait(pause_wait_lock);
+			}
+
+			if (stats.total_chunks % stats_print_interval == 0) {
+				print_stats(stats, false);
+			}
 		}
+
+	print_stats(stats, true);
+	}
+	catch (bad_alloc&)
+	{
+		qDebug() << "decodesignal out memory";
+		LogicSegment* ptr = const_cast<LogicSegment*>(input_segment.get());
+		ptr->mark_bad_memory();
+		return;
 	}
 }
 
@@ -1349,92 +1736,77 @@ void DecodeSignal::decode_proc()
 {
 	current_segment_id_ = 0;
 
-	// If there is no input data available yet, wait until it is or we're interrupted
-	do {
-		if (logic_mux_data_->logic_segments().size() == 0) {
-			// Wait for input data
+	shared_ptr<const LogicSegment> source_segment;
+	{
+		do {
+			for (const decode::DecodeChannel& ch : channels_) {
+				if (!ch.assigned_signal) continue;
+				auto logic = ch.assigned_signal->logic_data();
+				if (!logic || logic->logic_segments().empty()) continue;
+				source_segment = logic->logic_segments()[0]->get_shared_ptr();
+				break;
+			}
+			if (source_segment)
+				break;
+			// No data available yet, wait for notification
 			unique_lock<mutex> input_wait_lock(input_mutex_);
 			decode_input_cond_.wait(input_wait_lock);
-		}
-	} while ((!decode_interrupt_) && (logic_mux_data_->logic_segments().size() == 0));
+		} while (!decode_interrupt_);
+	}
 
 	if (decode_interrupt_)
 		return;
 
-	shared_ptr<const LogicSegment> input_segment = logic_mux_data_->logic_segments().front()->get_shared_ptr();
-	if (!input_segment)
+	if (decode_interrupt_)
 		return;
 
 	// Create the initial segment and set its sample rate so that we can pass it to SRD
 	create_decode_segment();
-	segments_.at(current_segment_id_).samplerate = input_segment->samplerate();
-	segments_.at(current_segment_id_).start_time = input_segment->start_time();
+	segments_.at(current_segment_id_).samplerate = source_segment->samplerate();
+	segments_.at(current_segment_id_).start_time = source_segment->start_time();
 
 	start_srd_session();
 
-	uint64_t samples_to_process = 0;
+	//fprintf(stderr, "DECODE_PROC: source_segment sample_count=%lu ,is_complete=%d\n", (unsigned long)source_segment->get_sample_count(), source_segment->is_complete());
+	auto decode_proc_start = std::chrono::steady_clock::now();
+	uint64_t total_decode_data_time_ms = 0;
+	uint64_t total_wait_time_ms = 0;
+
 	uint64_t abs_start_samplenum = 0;
 	do {
 		// Keep processing new samples until we exhaust the input data
+		uint64_t samples_to_process = 0;
 		do {
-			samples_to_process = input_segment->get_sample_count() - abs_start_samplenum;
-
+			samples_to_process = source_segment->get_sample_count() - abs_start_samplenum;
 			if (samples_to_process > 0) {
-				decode_data(abs_start_samplenum, samples_to_process, input_segment);
+				auto dd_t0 = std::chrono::steady_clock::now();
+				decode_data(abs_start_samplenum, samples_to_process, source_segment);
+				auto dd_t1 = std::chrono::steady_clock::now();
+				total_decode_data_time_ms += (uint64_t)std::chrono::duration<double, std::milli>(dd_t1 - dd_t0).count();
 				abs_start_samplenum += samples_to_process;
 			}
 		} while (!decode_interrupt_ && (samples_to_process > 0));
 
 		if (!decode_interrupt_) {
-			// samples_to_process is now 0, we've exhausted the currently available input data
-
-			// If the input segment is complete, we've exhausted this segment
-			if (input_segment->is_complete()) {
-#if defined HAVE_SRD_SESSION_SEND_EOF && HAVE_SRD_SESSION_SEND_EOF
-				// Tell protocol decoders about the end of
-				// the input data, which may result in more
-				// annotations being emitted
-				(void)srd_session_send_eof(srd_session_);
-				new_annotations();
-#endif
-
-				if (current_segment_id_ < (logic_mux_data_->logic_segments().size() - 1)) {
-					// Process next segment
-					current_segment_id_++;
-
-					try {
-						input_segment = logic_mux_data_->logic_segments().at(current_segment_id_);
-					} catch (out_of_range&) {
-						qDebug() << "Decode error for" << name() << ": no logic mux segment" \
-							<< current_segment_id_ << "in decode_proc(), mux segments size is" \
-							<< logic_mux_data_->logic_segments().size();
-						decode_interrupt_ = true;
-						return;
-					}
-					abs_start_samplenum = 0;
-
-					// Create the next segment and set its metadata
-					create_decode_segment();
-					segments_.at(current_segment_id_).samplerate = input_segment->samplerate();
-					segments_.at(current_segment_id_).start_time = input_segment->start_time();
-
-					// Reset decoder state but keep the decoder stack intact
-					terminate_srd_session();
-				} else {
-					// All segments have been processed
-					if (!decode_interrupt_)
-						decode_finished();
-
-					// Wait for more input data
-					unique_lock<mutex> input_wait_lock(input_mutex_);
-					decode_input_cond_.wait(input_wait_lock);
+			if (source_segment->is_complete()) {
+				// All data has been processed
+				{
+					auto decode_proc_end = std::chrono::steady_clock::now();
+					double total_ms = std::chrono::duration<double, std::milli>(decode_proc_end - decode_proc_start).count();
+					//fprintf(stderr, "DECODE_PROC_TOTAL: total=%.1fms decode_data=%.1fms wait_data=%.1fms\n", total_ms, (double)total_decode_data_time_ms, (double)total_wait_time_ms);
 				}
+				if (srd_session_) srd_session_send_eof(srd_session_);
+				if (!decode_interrupt_)
+					decode_finished();
+				return;
 			} else {
-				// Input segment isn't complete yet but samples_to_process is 0, wait for more input data
+				// Wait for more input data from acquisition
+				auto wt0 = std::chrono::steady_clock::now();
 				unique_lock<mutex> input_wait_lock(input_mutex_);
 				decode_input_cond_.wait(input_wait_lock);
+				auto wt1 = std::chrono::steady_clock::now();
+				total_wait_time_ms += (uint64_t)std::chrono::duration<double, std::milli>(wt1 - wt0).count();
 			}
-
 		}
 	} while (!decode_interrupt_);
 }
@@ -1521,9 +1893,6 @@ void DecodeSignal::terminate_srd_session()
 	// those stacks which still are processing data while the
 	// application no longer wants them to.
 	if (srd_session_) {
-#if defined HAVE_SRD_SESSION_SEND_EOF && HAVE_SRD_SESSION_SEND_EOF
-		(void)srd_session_send_eof(srd_session_);
-#endif
 		srd_session_terminate_reset(srd_session_);
 
 		// Metadata is cleared also, so re-set it
@@ -1823,7 +2192,6 @@ void DecodeSignal::logic_output_callback(srd_proto_data *pdata, void *decode_sig
 		else
 			for (unsigned int i = 0; i <= pdl->repeat_count; i++)
 				memcpy((void*)&data.data()[i * unit_size], (void*)pdl->data, unit_size);
-
 		last_segment->append_payload(data.data(), data.size());
 	} else
 		qWarning() << "Ignoring malformed logic output state change for group" << pdl->logic_group << "from decoder" \
@@ -1832,10 +2200,15 @@ void DecodeSignal::logic_output_callback(srd_proto_data *pdata, void *decode_sig
 
 void DecodeSignal::on_capture_state_changed(int state)
 {
+	current_state_ = state;
 	// If a new acquisition was started, we need to start decoding from scratch
 	if (state == Session::Running) {
+		reset_decode();
 		logic_mux_data_invalid_ = true;
 		begin_decode();
+	}
+	if (state == Session::Stopped) {
+		on_data_received();
 	}
 }
 
@@ -1857,11 +2230,13 @@ void DecodeSignal::on_data_received()
 		// TODO Emulate noquote()
 		qDebug().nospace() << name() << ": Input data available, error cleared";
 	}
-
 	if (!logic_mux_thread_.joinable())
 		begin_decode();
-	else
+	else{
+		// qDebug()<< "session_.decode_signal_map_.size() == " << session_.decode_signal_map_.size();
+		// if (session_.decode_signal_map_.size() == 1)
 		logic_mux_cond_.notify_one();
+	}
 }
 
 void DecodeSignal::on_input_segment_completed()

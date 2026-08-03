@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,6 +66,12 @@ QString Cursor::get_text() const
         view_.tick_prefix(), view_.time_unit(), view_.tick_precision());
 }
 
+QString Cursor::get_index_text() const
+{
+	QString text = "";
+	return 	text;
+}
+
 QRectF Cursor::label_rect(const QRectF &rect) const
 {
 	const shared_ptr<Cursor> other(get_other_cursor());
@@ -72,7 +80,7 @@ QRectF Cursor::label_rect(const QRectF &rect) const
 	const float x = get_x();
 
 	QFontMetrics m(QApplication::font());
-	QSize text_size = m.boundingRect(get_display_text()).size();
+	QSize text_size = m.boundingRect(get_text()).size();
 
 	const QSizeF label_size(
 		text_size.width() + LabelPadding.width() * 2,

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2015 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -94,21 +96,23 @@ string HardwareDevice::display_name(
 	vector<string> parts = {};
 	if (device_->vendor().length() > 0)
 		parts.push_back(device_->vendor());
-	if (device_->model().length() > 0)
-		parts.push_back(device_->model());
+	else
+		parts.push_back("Demo device");
+	// if (device_->model().length() > 0)
+	// 	parts.push_back(device_->model());
 
-	if (multiple_dev) {
-		if (device_->version().length() > 0)
-			parts.push_back(device_->version());
-		if (device_->serial_number().length() > 0)
-			parts.push_back("[S/N: " + device_->serial_number() + "]");
+	// if (multiple_dev) {
+	// 	if (device_->version().length() > 0)
+	// 		parts.push_back(device_->version());
+	// 	if (device_->serial_number().length() > 0)
+	// 		parts.push_back("[S/N: " + device_->serial_number() + "]");
 
-		if ((device_->serial_number().length() == 0) &&
-			(device_->connection_id().length() > 0))
-			parts.push_back("(" + device_->connection_id() + ")");
-	}
+	// 	if ((device_->serial_number().length() == 0) &&
+	// 		(device_->connection_id().length() > 0))
+	// 		parts.push_back("(" + device_->connection_id() + ")");
+	// }
 
-	return join(parts, " ");
+	return join(parts, "");
 }
 
 void HardwareDevice::open()

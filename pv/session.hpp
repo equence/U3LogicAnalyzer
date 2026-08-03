@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012-14 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -34,8 +36,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <glibmm/datetime.h>
+#include <atomic>
 
 #include <QObject>
 #include <QSettings>
@@ -125,12 +126,19 @@ public:
 		Running
 	};
 
+	enum capture_mode {
+		Single,
+		Repeat
+	};
+
 	static shared_ptr<sigrok::Context> sr_context;
 
 public:
 	Session(DeviceManager &device_manager, QString name);
 
 	~Session();
+
+	DeviceManager* device_manager_ptr();
 
 	DeviceManager& device_manager();
 
@@ -161,6 +169,7 @@ public:
 	void save_settings(QSettings &settings) const;
 	void restore_setup(QSettings &settings);
 	void restore_settings(QSettings &settings);
+	void device_detached();
 
 	/**
 	 * Attempts to set device instance, may fall back to demo if needed
@@ -187,7 +196,6 @@ public:
 	void stop_capture();
 
 	double get_samplerate() const;
-	Glib::DateTime get_acquisition_start_time() const;
 
 	uint32_t get_highest_segment_id() const;
 	uint64_t get_segment_sample_count(uint32_t segment_id) const;
@@ -205,20 +213,31 @@ public:
 	void add_generated_signal(shared_ptr<data::SignalBase> signal);
 	void remove_generated_signal(shared_ptr<data::SignalBase> signal);
 
+	uint64_t get_triggers_offs();
+	void feed_in_trigger(uint64_t trigger_offs);
+	void update_device_manager(DeviceManager *device_manager);
+
+
 #ifdef ENABLE_DECODE
 	shared_ptr<data::DecodeSignal> add_decode_signal();
 
 	void remove_decode_signal(shared_ptr<data::DecodeSignal> signal);
+
+	/**
+	 * Creates a default UART decoder for demo device with baudrate 115200
+	 * and TX channel mapped to D0.
+	 */
+	void create_demo_uart_decoder();
 #endif
 
 	bool all_segments_complete(uint32_t segment_id) const;
 
 	MetadataObjManager* metadata_obj_manager();
 
+	void update_signals();
+
 private:
 	void set_capture_state(capture_state state);
-
-	void update_signals();
 
 	shared_ptr<data::SignalBase> signalbase_from_channel(
 		shared_ptr<sigrok::Channel> channel) const;
@@ -228,7 +247,6 @@ private:
 		map<string, shared_ptr<Option>> fmt_opts);
 
 	void sample_thread_proc(function<void (const QString)> error_handler);
-
 	void free_unused_memory();
 
 	void signal_new_segment();
@@ -267,10 +285,20 @@ Q_SIGNALS:
 	void data_received();
 
 	void add_view(ViewType type, Session *session);
-	void session_error_raised(const QString text, const QString info_text);
-
+	void device_detach();
+	void mainwindow_show_error(QString err);
+	void mainwindow_show_info(QString info);
+	void mainwindow_close_decoder_dock(Session *session);
+	
+	void get_repeat_acquisition(bool& is_repeat_acquisition);
+	void notify_acq_done();
 public Q_SLOTS:
 	void on_data_saved();
+	void on_show_Error();
+	void on_info_received();
+	void on_renew_last_decoder_name(QString name);
+private Q_SLOTS:
+	void on_notify_acq_done();
 
 #ifdef ENABLE_DECODE
 	void on_new_decoders_selected(vector<const srd_decoder*> decoders);
@@ -278,8 +306,8 @@ public Q_SLOTS:
 
 private:
 	bool shutting_down_;
-
-	DeviceManager &device_manager_;
+	atomic<DeviceManager *>device_manager_;
+	// DeviceManager *device_manager_;
 	shared_ptr<devices::Device> device_;
 	QString default_name_, name_, save_path_;
 
@@ -296,7 +324,7 @@ private:
 	deque<data::SignalGroup*> signal_groups_;
 	map<uint8_t, uint32_t> next_index_list_; // signal type -> index counter
 
-	/// trigger_list_ contains pairs of <segment_id, timestamp> values
+	// trigger_list_ contains pairs of <segment_id, timestamp> values
 	vector< std::pair<uint32_t, util::Timestamp> > trigger_list_;
 
 	mutable recursive_mutex data_mutex_;
@@ -313,11 +341,20 @@ private:
 	bool out_of_memory_;
 	bool data_saved_;
 	bool frame_began_;
-
+	bool is_stop_capture_;
 	QElapsedTimer acq_time_;
-	Glib::DateTime acq_start_time_;
 
 	MetadataObjManager metadata_obj_manager_;
+
+	uint16_t logic_channel_count_;
+	volatile bool    is_wait_reattch_;
+    volatile int     wait_reattch_times_;
+	std::shared_ptr<sigrok::Trigger> pre_trigger_ptr_;
+
+public:
+	bool is_repeat_acquisition_;
+	map<shared_ptr<data::DecodeSignal>, QString> decode_signal_map_;
+	QString decoder_name_last_;
 
 #ifdef ENABLE_FLOW
 	RefPtr<Pipeline> pipeline_;

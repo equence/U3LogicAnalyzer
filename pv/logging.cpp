@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2018 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -191,13 +193,8 @@ int Logging::log_srd(void *cb_data, int loglevel, const char *format, va_list ar
 	char *text = g_strdup_vprintf(format, args);
 
 	QString s = QString::fromUtf8(text);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-	for (QString& substring : s.split("\n", Qt::SkipEmptyParts))
-			logging.log(substring, LogSource_srd);
-#else
 	for (QString& substring : s.split("\n", QString::SkipEmptyParts))
 			logging.log(substring, LogSource_srd);
-#endif
 	g_free(text);
 
 	return SR_OK;

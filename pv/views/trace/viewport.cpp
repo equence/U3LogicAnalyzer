@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +23,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
-
+#include <QDateTime>
 #include "signal.hpp"
 #include "view.hpp"
 #include "viewitempaintparams.hpp"
@@ -29,6 +31,7 @@
 
 #include <pv/session.hpp>
 
+#include <QPainterPath>
 #include <QMouseEvent>
 #include <QScreen>
 #include <QWindow>
@@ -43,11 +46,12 @@ using std::none_of; // NOLINT. Used in assert()s.
 using std::shared_ptr;
 using std::stable_sort;
 using std::vector;
-
+extern QPoint pos_;
 namespace pv {
 namespace views {
 namespace trace {
-
+const QColor LightBlue = QColor(17, 133, 209, 200);
+const QColor Orange = QColor(238, 178, 17, 255);
 Viewport::Viewport(View &parent) :
 	ViewWidget(parent),
 	pinch_zoom_active_(false)
@@ -57,7 +61,7 @@ Viewport::Viewport(View &parent) :
 
 	// Set up settings and event handlers
 	GlobalSettings settings;
-	allow_vertical_dragging_ = settings.value(GlobalSettings::Key_View_AllowVerticalDragging).toBool();
+	allow_vertical_dragging_ = false;
 
 	GlobalSettings::add_change_handler(this);
 }
@@ -104,6 +108,8 @@ void Viewport::drag_by(const QPoint &delta)
 
 	if (allow_vertical_dragging_)
 		view_.set_v_offset(-drag_v_offset_ - delta.y());
+
+	bezier_start_ = QPointF(0,0);
 }
 
 void Viewport::drag_release()
@@ -124,40 +130,12 @@ vector< shared_ptr<ViewItem> > Viewport::items()
 
 bool Viewport::touch_event(QTouchEvent *event)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	QList<QEventPoint> touchPoints = event->points();
-#else
 	QList<QTouchEvent::TouchPoint> touchPoints = event->touchPoints();
-#endif
 
 	if (touchPoints.count() != 2) {
 		pinch_zoom_active_ = false;
 		return false;
 	}
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	if (event->device()->type() == QInputDevice::DeviceType::TouchPad) {
-		return false;
-	}
-
-	const QEventPoint &touchPoint0 = touchPoints.first();
-	const QEventPoint &touchPoint1 = touchPoints.last();
-
-	if (!pinch_zoom_active_ ||
-		(event->touchPointStates() & QEventPoint::Pressed)) {
-		pinch_offset0_ = (view_.offset() + view_.scale() * touchPoint0.position().x()).convert_to<double>();
-		pinch_offset1_ = (view_.offset() + view_.scale() * touchPoint1.position().x()).convert_to<double>();
-		pinch_zoom_active_ = true;
-	}
-
-	double w = touchPoint1.position().x() - touchPoint0.position().x();
-	if (abs(w) >= 1.0) {
-		const double scale =
-			fabs((pinch_offset1_ - pinch_offset0_) / w);
-		double offset = pinch_offset0_ - touchPoint0.position().x() * scale;
-		if (scale > 0)
-			view_.set_scale_offset(scale, offset);
-	}
-#else
 	if (event->device()->type() == QTouchDevice::TouchPad) {
 		return false;
 	}
@@ -180,7 +158,6 @@ bool Viewport::touch_event(QTouchEvent *event)
 		if (scale > 0)
 			view_.set_scale_offset(scale, offset);
 	}
-#endif
 
 	if (event->touchPointStates() & Qt::TouchPointReleased) {
 		pinch_zoom_active_ = false;
@@ -191,16 +168,23 @@ bool Viewport::touch_event(QTouchEvent *event)
 		} else {
 			// Update the mouse down fields so that continued
 			// dragging with the primary touch will work correctly
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-			mouse_down_point_ = touchPoint0.position().toPoint();
-#else
 			mouse_down_point_ = touchPoint0.pos().toPoint();
-#endif
 			drag();
 		}
 	}
 
 	return true;
+}
+
+void CalcVertexes(double startX, double startY, double endX, double endY, double& x1, double& y1, double& x2, double& y2)
+{
+    double arrowLength = 7;  
+    double arrowDegrees = 0.5;  
+    double angle = atan2(endY - startY, endX - startX) + 3.1415926;
+    x1 = endX + arrowLength * cos(angle - arrowDegrees);
+    y1 = endY + arrowLength * sin(angle - arrowDegrees);
+    x2 = endX + arrowLength * cos(angle + arrowDegrees);
+    y2 = endY + arrowLength * sin(angle + arrowDegrees);
 }
 
 void Viewport::paintEvent(QPaintEvent*)
@@ -229,88 +213,191 @@ void Viewport::paintEvent(QPaintEvent*)
 	bool use_antialiasing =
 		window()->windowHandle()->screen()->devicePixelRatio() < 2.0;
 	p.setRenderHint(QPainter::Antialiasing, use_antialiasing);
-
 	for (LayerPaintFunc *paint_func = layer_paint_funcs;
 			*paint_func; paint_func++) {
 		ViewItemPaintParams time_pp(rect(), view_.scale(), view_.offset());
 		for (const shared_ptr<TimeItem>& t : time_items)
 			(t.get()->*(*paint_func))(p, time_pp);
-
+		
 		ViewItemPaintParams row_pp(rect(), view_.scale(), view_.offset());
 		for (const shared_ptr<ViewItem>& r : row_items)
 			(r.get()->*(*paint_func))(p, row_pp);
 	}
-
 	p.end();
+	if (bezier_start_ !=  QPointF(0,0) && bezier_end_ != QPointF(0,0)) {
+		QPainter painter(this);
+		painter.setPen(QPen(Qt::yellow, 1));
+		painter.setRenderHint(QPainter::Antialiasing);
+
+		painter.setPen(Qt::yellow);
+		painter.drawEllipse(bezier_start_, 2, 2);
+		painter.drawEllipse(bezier_end_, 2, 2);
+
+		QPointF midPoint((bezier_start_.x() + bezier_end_.x()) / 2, (bezier_start_.y() + bezier_end_.y()) / 2);
+
+		double dx = bezier_end_.x() - bezier_start_.x();
+		double dy = bezier_end_.y() - bezier_start_.y();
+
+		double distance = qMin(qAbs(dx), qAbs(dy)) / 2;
+
+		// 计算两个控制点的位置
+		QPointF controlPoint1(midPoint.x() - dy / std::sqrt(dx * dx + dy * dy) * distance,
+							midPoint.y() + dx / std::sqrt(dx * dx + dy * dy) * distance);
+		QPointF controlPoint2(midPoint.x() + dy / std::sqrt(dx * dx + dy * dy) * distance,
+							midPoint.y() - dx / std::sqrt(dx * dx + dy * dy) * distance);
+
+		// 创建贝塞尔曲线路径
+		QPainterPath path;
+		path.moveTo(bezier_start_);
+		path.cubicTo(controlPoint1, controlPoint2, bezier_end_);
+
+		// 绘制贝塞尔曲线
+		painter.setPen(QPen(Qt::yellow, 1.5)); // 曲线颜色和宽度
+		painter.drawPath(path);
+	
+		int typical_width = painter.boundingRect(0, 0, INT_MAX, INT_MAX,
+			Qt::AlignLeft | Qt::AlignTop, bezier_width_).width();
+		typical_width = typical_width + 50;
+		const double width = this->width();
+		const double height = view_.viewport()->height();
+		const double left = view_.hover_point().x();
+		const double top = view_.hover_point().y();
+		const double right = left + typical_width;
+		const double bottom = top + 20;
+		QPointF org_pos = QPointF(right > width ? left - typical_width : left, bottom > height ? top - 20 : top);
+		QRectF measure_rect = QRectF(org_pos.x(), org_pos.y(), (double)typical_width, 20.0);
+		QRectF measure1_rect = QRectF(org_pos.x(), org_pos.y(), (double)typical_width, 20.0);
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(LightBlue);
+		painter.drawRect(measure_rect);
+		painter.setPen(Orange);	
+		painter.drawText(measure1_rect, Qt::AlignRight | Qt::AlignVCenter,
+				tr("Width: ") + bezier_width_);			
+		painter.end();
+	} else if (measure_end_ != QPointF(0,0)) {
+		QPainter p(this);
+		p.setPen(QPen(Qt::yellow, 1));
+		QLineF l1(measure_start_, measure_end_);
+		p.drawLine(l1);
+		//arrow
+		double x1, y1, x2, y2;
+		CalcVertexes(measure_start_.x(), measure_start_.y(), measure_end_.x(), measure_end_.y(), x1, y1, x2, y2);
+		p.drawLine(measure_end_.x(), measure_end_.y(), x1, y1); 
+		p.drawLine(measure_end_.x(), measure_end_.y(), x2, y2); 
+		CalcVertexes(measure_end_.x(), measure_end_.y(), measure_start_.x(), measure_start_.y(), x1, y1, x2, y2);
+		p.drawLine(measure_start_.x(), measure_start_.y(), x1, y1); 
+		p.drawLine(measure_start_.x(), measure_start_.y(), x2, y2);
+		int typical_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
+			Qt::AlignLeft | Qt::AlignTop, width_).width();
+		typical_width = std::max(typical_width, p.boundingRect(0, 0, INT_MAX, INT_MAX,
+			Qt::AlignLeft | Qt::AlignTop, period_).width());
+		typical_width = std::max(typical_width, p.boundingRect(0, 0, INT_MAX, INT_MAX,
+			Qt::AlignLeft | Qt::AlignTop, freq_).width());
+		typical_width = std::max(typical_width, p.boundingRect(0, 0, INT_MAX, INT_MAX,
+			Qt::AlignLeft | Qt::AlignTop, duty_cycle_).width());
+		typical_width = typical_width + 100;
+		const double width = this->width();
+		const double height = view_.viewport()->height();
+		const double left = view_.hover_point().x();
+		const double top = view_.hover_point().y();
+		const double right = left + typical_width;
+		const double bottom = top + 80;
+		QPointF org_pos = QPointF(right > width ? left - typical_width : left, bottom > height ? top - 80 : top);
+		QRectF measure_rect = QRectF(org_pos.x(), org_pos.y(), (double)typical_width, 80.0);
+		QRectF measure1_rect = QRectF(org_pos.x(), org_pos.y(), (double)typical_width, 20.0);
+		QRectF measure2_rect = QRectF(org_pos.x(), org_pos.y() + 20, (double)typical_width, 20.0);
+		QRectF measure3_rect = QRectF(org_pos.x(), org_pos.y() + 40, (double)typical_width, 20.0);
+		QRectF measure4_rect = QRectF(org_pos.x(), org_pos.y() + 60, (double)typical_width, 20.0);
+		p.setBrush(Qt::yellow);
+		p.drawEllipse(measure_mid_, 2, 2); 
+		p.setPen(Qt::NoPen);
+		p.setBrush(LightBlue);
+		p.drawRect(measure_rect);
+		p.setPen(Orange);
+		p.drawText(measure1_rect, Qt::AlignRight | Qt::AlignVCenter,
+				tr("Width: ") + width_);
+		p.drawText(measure2_rect, Qt::AlignRight | Qt::AlignVCenter,
+				tr("Period: ") + period_);
+		p.drawText(measure3_rect, Qt::AlignRight | Qt::AlignVCenter,
+				tr("Frequency: ") + freq_);
+		p.drawText(measure4_rect, Qt::AlignRight | Qt::AlignVCenter,
+				tr("Duty Cycle: ") + duty_cycle_);
+		p.end();
+    }
 }
 
 void Viewport::mouseDoubleClickEvent(QMouseEvent *event)
 {
 	assert(event);
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	if (event->buttons() & Qt::LeftButton)
-		view_.zoom(2.0, event->position().x());
-	else if (event->buttons() & Qt::RightButton)
-		view_.zoom(-2.0, event->position().x());
-#else
-	if (event->buttons() & Qt::LeftButton)
-		view_.zoom(2.0, event->x());
-	else if (event->buttons() & Qt::RightButton)
-		view_.zoom(-2.0, event->x());
-#endif
+	// if (event->buttons() & Qt::LeftButton)
+	// 	view_.zoom(2.0, event->x());
+	// else if (event->buttons() & Qt::RightButton)
+	// 	view_.zoom(-2.0, event->x());
+	bezier_start_ = QPointF(0,0);
+	add_rule_flag(event);
 }
 
 void Viewport::wheelEvent(QWheelEvent *event)
 {
 	assert(event);
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
-	int delta = (event->angleDelta().x() != 0) ? event->angleDelta().x() : event->angleDelta().y();
-#else
 	int delta = event->delta();
-#endif
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
-	if (event->angleDelta().y() != 0) {
-#else
 	if (event->orientation() == Qt::Vertical) {
-#endif
 		if (event->modifiers() & Qt::ControlModifier) {
 			// Vertical scrolling with the control key pressed
 			// is intrepretted as vertical scrolling
 			view_.set_v_offset(-view_.owner_visual_v_offset() -
 				(delta * height()) / (8 * 120));
-		} else if (event->modifiers() & Qt::ShiftModifier) {
-			// Vertical scrolling with the shift key pressed
-			// acts as horizontal scrolling like in Gimp
-			// and Inkscape.
-			view_.set_scale_offset(view_.scale(),
-				- delta * view_.scale() + view_.offset());
 		} else {
 			// Vertical scrolling is interpreted as zooming in/out
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-			view_.zoom(delta / 120.0, event->position().x());
-#else
-			view_.zoom(delta / 120.0, event->x());
-#endif
+			double steps = delta / 250.0;
+			double scale = view_.scale() * pow(2.0, -steps);
+			pv::util::Timestamp cursor_offset = view_.offset() + view_.scale() * event->x();
+			pv::util::Timestamp new_scale = std::max(std::min(scale, view_.current_max_scale_), 1e-12);
+			pv::util::Timestamp new_offset = cursor_offset - new_scale * event->x();
+			new_offset = std::max(0.00, std::min((double)(view_.current_max_offset_ - new_scale * view_.viewport_width()), (double)new_offset));
+
+			// if ((double)new_offset + new_scale * view_.viewport_width() > view_.current_max_offset_){
+			// 	new_offset = view_.current_max_offset_ - new_scale * view_.viewport_width();
+			// }
+			// if (new_offset < 0){
+			// 	new_offset = 0;
+			// }
+			view_.set_scale_offset((double)new_scale, new_offset);
 		}
-#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
-	} else if (event->angleDelta().x() != 0) {
-#else
 	} else if (event->orientation() == Qt::Horizontal) {
-#endif
 		// Horizontal scrolling is interpreted as moving left/right
 		view_.set_scale_offset(view_.scale(),
 			delta * view_.scale() + view_.offset());
 	}
+	if (bezier_start_ != QPointF(0,0)) {
+		float new_point_x = view_.update_bezier_start();
+		bezier_start_.setX(new_point_x);
+		bezier_end_ = view_.hover_point();
+		SetMeasurePoint(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0));
+	} else {
+		view_.renew_measure();
+	}
+
+	event->accept();
 }
 
 void Viewport::on_setting_changed(const QString &key, const QVariant &value)
 {
 	if (key == GlobalSettings::Key_View_AllowVerticalDragging)
 		allow_vertical_dragging_ = value.toBool();
+	allow_vertical_dragging_ = false;
 }
+
+void Viewport::SetMeasurePoint(QPointF q1, QPointF q2, QPointF q3)
+{
+	measure_start_ = q1;
+	measure_mid_ = q2;
+	measure_end_ = q3;
+}
+
 
 } // namespace trace
 } // namespace views

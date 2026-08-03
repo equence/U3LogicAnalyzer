@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2020 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -259,11 +261,7 @@ MathEditDialog::MathEditDialog(pv::Session &session,
 	root_layout->addWidget(button_box);
 
 	// Set tab width to 4 characters
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-	expr_edit_->setTabStopDistance(util::text_width(QFontMetrics(font()), "XXXX"));
-#else
 	expr_edit_->setTabStopWidth(util::text_width(QFontMetrics(font()), "XXXX"));
-#endif
 
 	connect(button_box, SIGNAL(accepted()), this, SLOT(accept()));
 	connect(button_box, SIGNAL(rejected()), this, SLOT(reject()));

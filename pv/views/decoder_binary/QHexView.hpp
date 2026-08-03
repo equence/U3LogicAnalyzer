@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2015 Victor Anjin <virinext@gmail.com>
  * Copyright (C) 2019 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * The MIT License (MIT)
  *
@@ -66,6 +68,8 @@ public:
 	void clear();
 	void showFromOffset(size_t offset);
 	virtual QSizePolicy sizePolicy() const;
+	virtual QSize minimumSizeHint() const;
+	virtual QSize sizeHint() const;
 
 	pair<size_t, size_t> get_selection() const;
 
@@ -80,6 +84,7 @@ protected:
 	void keyPressEvent(QKeyEvent *event);
 	void mouseMoveEvent(QMouseEvent *event);
 	void mousePressEvent(QMouseEvent *event);
+	void mouseReleaseEvent(QMouseEvent *event);
 
 private:
 	QSize getFullSize() const;
@@ -99,6 +104,7 @@ private:
 	size_t charWidth_, charHeight_;
 	size_t selectBegin_, selectEnd_, selectInit_, cursorPos_;
 	uint8_t address_digits_;
+	bool mouse_pressed_;  // 跟踪鼠标是否按下
 
 	size_t current_chunk_id_, current_chunk_offset_, current_offset_;
 	DecodeBinaryDataChunk current_chunk_; // Cache locally so that we're not messed up when the vector is re-allocating its data

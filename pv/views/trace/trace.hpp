@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -161,6 +163,9 @@ public:
 	int get_current_segment() const;
 
 	virtual void hover_point_changed(const QPoint &hp);
+	QPoint get_position();
+
+	void close_popup();
 
 protected:
 	/**
@@ -182,7 +187,7 @@ protected:
 	 * Draw a hover marker under the cursor position.
 	 * @param p The painter to draw into.
 	 */
-	void paint_hover_marker(QPainter &p);
+	virtual void paint_hover_marker(QPainter &p);
 
 	void add_color_option(QWidget *parent, QFormLayout *form);
 
@@ -204,6 +209,7 @@ private Q_SLOTS:
 
 	void on_create_marker_here() const;
 
+	void on_create_measure_here();
 protected:
 	shared_ptr<data::SignalBase> base_;
 	QPen axis_pen_;
@@ -212,7 +218,7 @@ protected:
 	bool show_hover_marker_;
 
 	uint32_t context_menu_x_pos_;
-
+	uint32_t context_menu_y_pos_;
 	/// The ID of the currently displayed segment
 	int current_segment_;
 

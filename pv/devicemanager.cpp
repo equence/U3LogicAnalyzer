@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -245,14 +247,16 @@ DeviceManager::driver_scan(
 
 	assert(driver);
 
-	if (!driver_supported(driver))
+	if (!driver_supported(driver)){
+		qDebug() << "!driver_supported(driver)";
 		return driver_devices;
+	}
 
 	// Remove any device instances from this driver from the device
 	// list. They will not be valid after the scan.
 	devices_.remove_if([&](shared_ptr<devices::HardwareDevice> device) {
 		return device->hardware_device()->driver() == driver; });
-
+	
 	try {
 		// Do the scan
 		auto devices = driver->scan(drvopts);
@@ -261,14 +265,14 @@ DeviceManager::driver_scan(
 		for (shared_ptr<sigrok::HardwareDevice>& device : devices) {
 			const shared_ptr<devices::HardwareDevice> d(
 				new devices::HardwareDevice(context_, device));
-			driver_devices.push_back(d);
+			driver_devices.push_front(d);
 		}
 
 		devices_.insert(devices_.end(), driver_devices.begin(),
 			driver_devices.end());
-		devices_.sort(bind(&DeviceManager::compare_devices, this, _1, _2));
-		driver_devices.sort(bind(
-			&DeviceManager::compare_devices, this, _1, _2));
+		// devices_.sort(bind(&DeviceManager::compare_devices, this, _1, _2));
+		// driver_devices.sort(bind(
+		// 	&DeviceManager::compare_devices, this, _1, _2));
 
 	} catch (const sigrok::Error &e) {
 		qWarning() << QApplication::tr("Error when scanning device driver '%1': %2").

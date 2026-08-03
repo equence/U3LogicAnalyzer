@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
  * Copyright (C) 2016 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -93,7 +95,6 @@ public:
 	virtual void clear_signalbases();
 	virtual void add_signalbase(const shared_ptr<data::SignalBase> signalbase);
 	virtual void remove_signalbase(const shared_ptr<data::SignalBase> signalbase);
-
 #ifdef ENABLE_DECODE
 	virtual void clear_decode_signals();
 	virtual void add_decode_signal(shared_ptr<data::DecodeSignal> signal);

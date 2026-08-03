@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2013 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -150,7 +152,7 @@ protected:
 	QPoint mouse_down_point_;
 	pv::util::Timestamp mouse_down_offset_;
 	shared_ptr<ViewItem> mouse_down_item_;
-
+	double new_offset_;
 	/// Keyboard modifiers that were active when mouse was last moved or clicked
 	Qt::KeyboardModifiers mouse_modifiers_;
 

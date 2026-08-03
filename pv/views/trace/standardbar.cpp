@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2016 Soeren Apel <soeren@apelpie.net>
  * Copyright (C) 2012-2015 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,13 +22,17 @@
 
 #include <QAction>
 #include <QMessageBox>
+#include <QSize>
 
 #include "standardbar.hpp"
 #include "view.hpp"
 
 #include <pv/mainwindow.hpp>
-
+std::thread t_proc;
 using pv::views::trace::View;
+#define M (1000*1000UL)
+
+#define SR_MHZ(n) ((n) * UINT64_C(1000000))
 
 namespace pv {
 namespace views {
@@ -46,10 +52,11 @@ StandardBar::StandardBar(Session &session, QWidget *parent,
 	action_sdm_last_(new QAction(this)),
 	action_sdm_last_complete_(new QAction(this)),
 	action_sdm_single_(new QAction(this)),
+	show_cursors_(new QToolButton()),
 	segment_selector_(new QSpinBox(this))
 {
 	setObjectName(QString::fromUtf8("StandardBar"));
-
+	setIconSize(QSize(32, 32));
 	// Actions
 	action_view_zoom_in_->setText(tr("Zoom &In"));
 	action_view_zoom_in_->setIcon(QIcon::fromTheme("zoom-in",
@@ -75,11 +82,14 @@ StandardBar::StandardBar(Session &session, QWidget *parent,
 		this, SLOT(on_actionViewZoomFit_triggered(bool)));
 
 	action_view_show_cursors_->setCheckable(true);
-	action_view_show_cursors_->setIcon(QIcon(":/icons/show-cursors.svg"));
+	action_view_show_cursors_->setIcon(QIcon(":/icons/show-cursors.png"));
 	action_view_show_cursors_->setShortcut(QKeySequence(Qt::Key_C));
 	connect(action_view_show_cursors_, SIGNAL(triggered(bool)),
 		this, SLOT(on_actionViewShowCursors_triggered()));
 	action_view_show_cursors_->setText(tr("Show &Cursors"));
+	show_cursors_->setDefaultAction(action_view_show_cursors_);
+	show_cursors_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+	show_cursors_->setText(tr("Show Cursors"));
 
 	action_sdm_last_->setIcon(QIcon(":/icons/view-displaymode-last_segment.svg"));
 	action_sdm_last_->setText(tr("Display last segment only"));
@@ -127,27 +137,38 @@ StandardBar::StandardBar(Session &session, QWidget *parent,
 
 	connect(view_, SIGNAL(cursor_state_changed(bool)),
 		this, SLOT(on_cursor_state_changed(bool)));
-
+	connect(this, SIGNAL(notify_session_info()),
+		&session_, SLOT(on_info_received()));
 	if (add_default_widgets)
 		add_toolbar_widgets();
+	ThreadRunning = false;
 }
-
+StandardBar::~StandardBar()
+{
+	ThreadRunning = false;
+}
 Session &StandardBar::session() const
 {
 	return session_;
 }
 
+trace::View *StandardBar::view()
+{
+	return view_;
+}
+
 void StandardBar::add_toolbar_widgets()
 {
 	// Setup the toolbar
-	addAction(action_view_zoom_in_);
-	addAction(action_view_zoom_out_);
-	addAction(action_view_zoom_fit_);
-	addSeparator();
-	addAction(action_view_show_cursors_);
-	multi_segment_actions_.push_back(addSeparator());
-	multi_segment_actions_.push_back(addWidget(segment_display_mode_selector_));
-	multi_segment_actions_.push_back(addWidget(segment_selector_));
+	// addAction(action_view_zoom_in_);
+	// addAction(action_view_zoom_out_);
+	// addAction(action_view_zoom_fit_);
+	// addSeparator();
+	// addAction(action_view_show_cursors_);
+	addWidget(show_cursors_);
+	// multi_segment_actions_.push_back(addSeparator());
+	addWidget(segment_display_mode_selector_);
+	// multi_segment_actions_.push_back(addWidget(segment_selector_));
 	addSeparator();
 
 	// Hide the multi-segment UI until we know that there are multiple segments
@@ -206,7 +227,9 @@ void StandardBar::on_actionViewShowCursors_triggered()
 		view_->center_cursors();
 
 	view_->show_cursors(show);
+	
 }
+
 
 void StandardBar::on_actionSDMLast_triggered()
 {

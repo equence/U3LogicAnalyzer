@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2015 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +23,7 @@
 
 #include <QTimer>
 #include <QToolTip>
-
+#include <QDebug>
 #include <libsigrokcxx/libsigrokcxx.hpp>
 
 #include <pv/devicemanager.hpp>
@@ -41,7 +43,7 @@ namespace pv {
 namespace widgets {
 
 DeviceToolButton::DeviceToolButton(QWidget *parent,
-	DeviceManager &device_manager,
+	DeviceManager *device_manager,
 	QAction *connect_action) :
 	QToolButton(parent),
 	device_manager_(device_manager),
@@ -52,19 +54,17 @@ DeviceToolButton::DeviceToolButton(QWidget *parent,
 {
 	setPopupMode(QToolButton::MenuButtonPopup);
 	setMenu(&menu_);
-	setDefaultAction(connect_action_);
-	setMinimumWidth(QFontMetrics(font()).averageCharWidth() * 24);
+	setToolTip("");
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	connect(&mapper_, SIGNAL(mappedObject(QObject*)),
-		this, SLOT(on_action(QObject*)));
-#else
+	connect(this, SIGNAL(clicked()), this, SLOT(on_button_clicked()));
+
 	connect(&mapper_, SIGNAL(mapped(QObject*)),
 		this, SLOT(on_action(QObject*)));
-#endif
 
 	connect(&menu_, SIGNAL(hovered(QAction*)),
 		this, SLOT(on_menu_hovered(QAction*)));
+
+	setMinimumWidth(QFontMetrics(font()).averageCharWidth() * 16);
 }
 
 shared_ptr<Device> DeviceToolButton::selected_device()
@@ -77,7 +77,7 @@ void DeviceToolButton::set_device_list(
 {
 	selected_device_ = selected;
 	setText(selected ? QString::fromStdString(
-		selected->display_name(device_manager_)) : tr("<No Device>"));
+		selected->display_name(*device_manager_)) : tr("<No Device>"));
 	devices_ = vector< weak_ptr<Device> >(devices.begin(), devices.end());
 	update_device_list();
 }
@@ -85,16 +85,16 @@ void DeviceToolButton::set_device_list(
 void DeviceToolButton::reset()
 {
 	setText(tr("<No Device>"));
-	selected_device_.reset();
-	update_device_list();
+}
+
+void DeviceToolButton::set_device_list_name(QString &device_list_name)
+{
+	setText(device_list_name);
 }
 
 void DeviceToolButton::update_device_list()
 {
 	menu_.clear();
-	menu_.addAction(connect_action_);
-	menu_.setDefaultAction(connect_action_);
-	menu_.addSeparator();
 
 	for (weak_ptr<Device>& dev_weak_ptr : devices_) {
 		shared_ptr<Device> dev(dev_weak_ptr.lock());
@@ -102,7 +102,7 @@ void DeviceToolButton::update_device_list()
 			continue;
 
 		QAction *const a = new QAction(QString::fromStdString(
-			dev->display_name(device_manager_)), this);
+			dev->display_name(*device_manager_)), this);
 		a->setCheckable(true);
 		a->setChecked(selected_device_ == dev);
 		a->setData(QVariant::fromValue((void*)dev.get()));
@@ -113,6 +113,11 @@ void DeviceToolButton::update_device_list()
 
 		menu_.addAction(a);
 	}
+}
+
+void DeviceToolButton::update_device_mamager(DeviceManager * dev_manager)
+{
+	device_manager_ = dev_manager;
 }
 
 void DeviceToolButton::on_action(QObject *action)
@@ -132,8 +137,7 @@ void DeviceToolButton::on_action(QObject *action)
 
 	update_device_list();
 	setText(QString::fromStdString(
-		selected_device_->display_name(device_manager_)));
-
+		selected_device_->display_name(*device_manager_)));
 	device_selected();
 }
 
@@ -160,6 +164,11 @@ void DeviceToolButton::on_menu_hover_timeout()
 		return;
 
 	QToolTip::showText(QCursor::pos(), device_tooltip_);
+}
+
+void DeviceToolButton::on_button_clicked()
+{
+	menu_.exec(mapToGlobal(QPoint(0, height())));
 }
 
 }  // namespace widgets

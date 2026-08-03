@@ -1,8 +1,10 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnaylzer is based on Pulseview.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
  * Copyright (C) 2016 Soeren Apel <soeren@apelpie.net>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,8 +38,8 @@ namespace views {
 const char* ViewTypeNames[ViewTypeCount] = {
 	"Trace View",
 #ifdef ENABLE_DECODE
-	"Binary Decoder Output View",
-	"Tabular Decoder Output View"
+	"二进制解码器视图",
+	"表格解码器视图"
 #endif
 };
 

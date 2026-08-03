@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,6 +42,26 @@ using namespace Qt;
 
 namespace pv {
 namespace util {
+
+WchDeviceType get_wch_device_type(const QString& vendorName) {
+	if (vendorName == "USB3.0(CH569)")
+		return WchDeviceType::CH569;
+	if (vendorName == "USB3.0(CH32H417)")
+		return WchDeviceType::CH32H417;
+	return WchDeviceType::None;
+}
+
+WchDeviceType get_wch_device_type_by_driver(const string& driverName) {
+	if (driverName == "wch-ch569")
+		return WchDeviceType::CH569;
+	if (driverName == "wch-ch32h417")
+		return WchDeviceType::CH32H417;
+	return WchDeviceType::None;
+}
+
+bool is_wch_device(const QString& vendorName) {
+	return get_wch_device_type(vendorName) != WchDeviceType::None;
+}
 
 static QTextStream& operator<<(QTextStream& stream, SIPrefix prefix)
 {

@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -49,7 +51,7 @@ namespace pv {
 namespace views {
 namespace trace {
 
-const int Header::Padding = 12;
+const int Header::Padding = 8;
 
 static bool item_selected(shared_ptr<TraceTreeItem> r)
 {
@@ -115,7 +117,6 @@ void Header::paintEvent(QPaintEvent*)
 			r->label_rect(rect).contains(mouse_point_);
 		r->paint_label(painter, rect, highlight);
 	}
-
 	painter.end();
 }
 

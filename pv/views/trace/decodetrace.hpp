@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2012 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -180,6 +182,8 @@ public:
 
 	void populate_popup_form(QWidget *parent, QFormLayout *form);
 
+	void create_decoder_options(QWidget *parent, QFormLayout *form);
+
 	QMenu* create_header_context_menu(QWidget *parent);
 
 	virtual QMenu* create_view_context_menu(QWidget *parent, QPoint &click_pos);
@@ -278,11 +282,7 @@ private Q_SLOTS:
 
 	void on_show_hide_decoder(int index);
 	void on_show_hide_row(int row_id);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-	void on_show_hide_class(QObject* sender);
-#else
 	void on_show_hide_class(QWidget* sender);
-#endif
 	void on_show_all_classes();
 	void on_hide_all_classes();
 	void on_row_container_resized(QWidget* sender);
@@ -298,6 +298,14 @@ private Q_SLOTS:
 
 	void on_animation_timer();
 	void on_hide_hidden_rows();
+	void on_show_message(QString err);
+	void on_start_position_changed(int index);
+	void on_end_position_changed(int index);
+	void on_comfirm_button_clicked();
+
+
+public Q_SLOTS:
+	void on_signal_height_change(int height);
 
 private:
 	pv::Session &session_;
@@ -328,6 +336,14 @@ private:
 	QTimer delayed_trace_updater_, animation_timer_, delayed_hidden_row_hider_;
 
 	QPolygon default_marker_shape_;
+
+	QComboBox * start_position_combobox_;
+	QComboBox * end_position_combobox_;
+
+	vector<uint64_t> flag_position_;
+
+	QString start_combobox_current_text_;
+	QString end_combobox_current_text_;
 
 #if DECODETRACE_SHOW_RENDER_TIME
 	QElapsedTimer render_time_;

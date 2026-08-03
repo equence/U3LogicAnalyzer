@@ -1,7 +1,9 @@
 /*
- * This file is part of the PulseView project.
+ * This file is part of the LogicAnalyzer project.
+ * LogicAnalyzer is based on PulseView.
  *
  * Copyright (C) 2014 Joel Holdsworth <joel@airwebreathe.org.uk>
+ * Copyright (C) 2026 Q2H2
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,7 +30,7 @@
 #include <QMenu>
 #include <QSignalMapper>
 #include <QToolButton>
-
+#include "../devicemanager.hpp"
 using std::list;
 using std::shared_ptr;
 using std::vector;
@@ -57,7 +59,7 @@ public:
 	 * @param device_manager the device manager.
 	 * @param connect_action the connect-to-device action.
 	 */
-	DeviceToolButton(QWidget *parent, DeviceManager &device_manager,
+	DeviceToolButton(QWidget *parent, DeviceManager *device_manager,
 		QAction *connect_action);
 
 	/**
@@ -79,6 +81,9 @@ public:
 	 * device fails to open.
 	 */
 	void reset();
+	void set_device_list_name(QString &device_list_name);
+
+	void update_device_mamager(DeviceManager * dev_manager);
 
 private:
 	/**
@@ -88,16 +93,15 @@ private:
 
 private Q_SLOTS:
 	void on_action(QObject *action);
-
 	void on_menu_hovered(QAction *action);
-
 	void on_menu_hover_timeout();
+	void on_button_clicked();  // 处理按钮点击，显示下拉菜单
 
 Q_SIGNALS:
 	void device_selected();
 
 private:
-	DeviceManager &device_manager_;
+	DeviceManager * device_manager_;
 	QAction *const connect_action_;
 
 	QMenu menu_;
