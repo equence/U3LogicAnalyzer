@@ -1,17 +1,116 @@
-name: Build PulseView artifacts
+name: Build U3LogicAnalyzer
 
 on:
-  push:                # When the repo itself has a new commit on the master branch
+  push:
     branches:
       - master
-    tags:              # When a new tag was created
-  workflow_dispatch:   # When the workflow was started manually from github
+    tags:
+      - 'v*'
   pull_request:
-    types:
-      - labeled        # When a pull request received a new label (e.g. "provide_binaries")
-      - synchronize    # When a pull request's branch was updated with a new commit
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  call-build-workflow:
-    name: Sigrok artifact builder
-    uses: sigrokproject/sigrok-build/.github/workflows/build.yml@master
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-glibmm
+            mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-hidapi
+            mingw-w64-x86_64-libzip
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-qt5
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-zip
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install pkgconf cmake ninja qt@5 glibmm@2.66 glib libusb \
+            hidapi libzip boost python@3.14
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            qtbase5-dev qttools5-dev libqt5svg5-dev \
+            libglib2.0-dev libglibmm-2.4-dev libusb-1.0-0-dev \
+            libhidapi-dev libzip-dev libboost-dev python3-dev
+
+      - name: Build (macOS / Linux)
+        if: runner.os != 'Windows'
+        env:
+          LIBSIGROK_URL: ${{ vars.LIBSIGROK_URL }}
+          LIBSIGROKDECODE_URL: ${{ vars.LIBSIGROKDECODE_URL }}
+        run: ./build_macos.sh
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          LIBSIGROK_URL: ${{ vars.LIBSIGROK_URL }}
+          LIBSIGROKDECODE_URL: ${{ vars.LIBSIGROKDECODE_URL }}
+        run: ./build_windows.sh
+
+      - name: Package macOS app + DMG
+        if: runner.os == 'macOS'
+        run: ./package_app.sh --dmg
+
+      - name: Package Linux tarball
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/U3LogicAnalyzer-linux/bin \
+                   dist/U3LogicAnalyzer-linux/share/libsigrokdecode
+          cp build/pulseview_build/LogicAnalyzer dist/U3LogicAnalyzer-linux/bin/
+          cp -R build/install/share/libsigrokdecode/decoders \
+                dist/U3LogicAnalyzer-linux/share/libsigrokdecode/
+          tar -C dist -czf build/U3LogicAnalyzer-linux.tar.gz U3LogicAnalyzer-linux
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-${{ github.ref_name }}
+          path: |
+            build/U3LogicAnalyzer.dmg
+            build/U3LogicAnalyzer-linux.tar.gz
+            build/LogicAnalyzer-win64.zip
+          if-no-files-found: warn
+
+      - name: Publish release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/U3LogicAnalyzer.dmg
+            build/U3LogicAnalyzer-linux.tar.gz
+            build/LogicAnalyzer-win64.zip
+          generate_release_notes: true
