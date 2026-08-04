@@ -675,15 +675,26 @@ if(WIN32)
 	list(APPEND PULSEVIEW_LINK_LIBS -lhidapi -lsetupapi -lusb-1.0 -ldwmapi)
 endif()
 
-# IAP dialog uses hidapi; resolve it via pkg-config on non-Windows platforms
+# IAP dialog uses hidapi. pkg-config module name differs by platform:
+# hidapi (Homebrew/MSYS2), hidapi-hidraw / hidapi-libusb (Debian/Ubuntu).
+pkg_check_modules(HIDAPI QUIET hidapi)
+if(NOT HIDAPI_FOUND)
+	pkg_check_modules(HIDAPI QUIET hidapi-hidraw)
+endif()
+if(NOT HIDAPI_FOUND)
+	pkg_check_modules(HIDAPI QUIET hidapi-libusb)
+endif()
+if(HIDAPI_FOUND)
+	include_directories(${HIDAPI_INCLUDE_DIRS})
+	list(APPEND PULSEVIEW_LINK_LIBS ${HIDAPI_LIBRARIES})
+elseif(WIN32)
+	# MSYS2/MinGW fallback: header lives under /mingw64/include/hidapi
+	include_directories(/mingw64/include/hidapi)
+else()
+	message(FATAL_ERROR "hidapi not found (required by the IAP dialog); install it, e.g. 'brew install hidapi'")
+endif()
+
 if(NOT WIN32)
-	pkg_check_modules(HIDAPI hidapi)
-	if(HIDAPI_FOUND)
-		include_directories(${HIDAPI_INCLUDE_DIRS})
-		list(APPEND PULSEVIEW_LINK_LIBS ${HIDAPI_LIBRARIES})
-	else()
-		message(FATAL_ERROR "hidapi not found (required by the IAP dialog); install it, e.g. 'brew install hidapi'")
-	endif()
 	# The CH569 hot-plug polling thread (mainbar.cpp) calls libusb directly
 	pkg_check_modules(LIBUSB libusb-1.0)
 	if(LIBUSB_FOUND)
