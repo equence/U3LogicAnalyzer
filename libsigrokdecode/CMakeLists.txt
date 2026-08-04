@@ -88,10 +88,11 @@ link_directories(
     ${PYTHON3_LIBRARY_DIRS}
 )
 
-# Homebrew's python3.pc omits the library on macOS; ask python3-config for it.
-if(APPLE AND NOT PYTHON3_LIBRARIES)
+# Some distributions (Homebrew, Debian/Ubuntu) ship a python3.pc without the
+# library; ask python3-config for the embed flags instead.
+if(NOT WIN32 AND NOT PYTHON3_LIBRARIES)
     find_program(PYTHON3_CONFIG_EXECUTABLE
-        NAMES python3-config python3.14-config
+        NAMES python3-config python3.14-config python3.12-config
         HINTS ${PYTHON3_PREFIX}/bin)
     if(PYTHON3_CONFIG_EXECUTABLE)
         execute_process(
