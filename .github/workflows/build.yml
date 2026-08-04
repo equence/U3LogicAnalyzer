@@ -49,7 +49,7 @@ jobs:
             mingw-w64-x86_64-boost
             mingw-w64-x86_64-qt5
             mingw-w64-x86_64-python
-            mingw-w64-x86_64-zip
+            zip
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
@@ -64,7 +64,8 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build pkg-config \
             qtbase5-dev qttools5-dev libqt5svg5-dev \
             libglib2.0-dev libglibmm-2.4-dev libusb-1.0-0-dev \
-            libhidapi-dev libzip-dev libboost-dev python3-dev
+            libhidapi-dev libzip-dev libboost-dev libboost-filesystem-dev \
+            libboost-serialization-dev python3-dev
 
       - name: Build (macOS / Linux)
         if: runner.os != 'Windows'

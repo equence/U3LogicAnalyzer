@@ -64,7 +64,8 @@ Linux（Debian/Ubuntu 示例，包名以发行版为准）：
 sudo apt install build-essential cmake ninja-build pkg-config \
   qtbase5-dev qttools5-dev libqt5svg5-dev \
   libglib2.0-dev libglibmm-2.4-dev libusb-1.0-0-dev \
-  libhidapi-dev libzip-dev libboost-dev python3-dev
+  libhidapi-dev libzip-dev libboost-dev libboost-filesystem-dev \
+  libboost-serialization-dev python3-dev
 ```
 
 ### 第 3 步：一键构建

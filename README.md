@@ -51,10 +51,11 @@ brew install pkgconf cmake ninja qt@5 glibmm@2.66 glib libusb hidapi \
 Linux (Debian/Ubuntu example):
 
 ```bash
-sudo apt install build-essential cmake ninja-build pkg-config \
-  qtbase5-dev qttools5-dev libqt5svg5-dev libglib2.0-dev \
-  libglibmm-2.4-dev libusb-1.0-0-dev libhidapi-dev libzip-dev \
-  libboost-dev python3-dev
+    sudo apt install build-essential cmake ninja-build pkg-config \
+      qtbase5-dev qttools5-dev libqt5svg5-dev libglib2.0-dev \
+      libglibmm-2.4-dev libusb-1.0-0-dev libhidapi-dev libzip-dev \
+      libboost-dev libboost-filesystem-dev libboost-serialization-dev \
+      python3-dev
 ```
 
 ### Step 3 - Build
