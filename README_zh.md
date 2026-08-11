@@ -23,6 +23,12 @@ PulseView 0.5.0 修改，内置裁剪后的 sigrok 软件栈（libsigrok + libsi
 - macOS 应用打包（.app）
 - 应用名：U3LogicAnalyzer
 
+## 固件工程
+
+固件工程位于仓库中的 [`firmware`](firmware/)，包含 APP、IAP 以及 V3F/V5F 工程文件和已生成固件。
+
+原工程链接：[OSHWHub - CH32H417 Logic Analyzer](https://oshwhub.com/q2h2/project_bszkxrnf?jlc_vid=E1VbBAYEQQUPUAJWQAVZAQBXRVMMUFdQFFJbAgJVRgcxVlNeQVVdU1JXRFNdUTsOAxUeFF5JWA4dDxMOAgNABAsLWA%3D%3D)
+
 ## 构建流程
 
 ### 第 1 步：获取源码（仓库自包含）

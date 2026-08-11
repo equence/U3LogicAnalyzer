@@ -1,0 +1,32 @@
+{
+	"folders": [
+		{
+			"name": ".mrs",
+			"path": "."
+		},
+		{
+			"name": "V3F",
+			"path": "../../CH32H417_Logic_Analyzer_APP/V3F"
+		},
+		{
+			"name": "V5F",
+			"path": "../../CH32H417_Logic_Analyzer_APP/V5F"
+		}
+	],
+	"settings": {
+		"mrs.workspace.type": "solution",
+		"mrs.workspace.slnLoaded": "/Users/wangmian/Downloads/CH32H417_Logic_Analyzer_1v0/CH32H417_Logic_Analyzer_APP/CH32H417_Logic_Analyzer.wvsln",
+		"files.associations": {
+			"*.c": "c",
+			"*.h": "cpp",
+			"*.hxx": "cpp",
+			"*.hpp": "cpp",
+			"*.c++": "cpp",
+			"*.cpp": "cpp",
+			"*.cxx": "cpp",
+			"*.cc": "cpp",
+			"*.hh": "cpp",
+			"*.h++": "cpp"
+		}
+	}
+}

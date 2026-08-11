@@ -25,6 +25,12 @@ analyzer, based on PulseView 0.5.0 with a trimmed sigrok stack
 - macOS .app / DMG packaging
 - App name: U3LogicAnalyzer
 
+## Firmware project
+
+The firmware project is included in [`firmware`](firmware/), including the APP, IAP, V3F/V5F projects, and generated firmware files.
+
+Original project: [OSHWHub - CH32H417 Logic Analyzer](https://oshwhub.com/q2h2/project_bszkxrnf?jlc_vid=E1VbBAYEQQUPUAJWQAVZAQBXRVMMUFdQFFJbAgJVRgcxVlNeQVVdU1JXRFNdUTsOAxUeFF5JWA4dDxMOAgNABAsLWA%3D%3D)
+
 ## Complete flow (from scratch)
 
 ### Step 1 - Get the sources
