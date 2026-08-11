@@ -39,6 +39,8 @@
 #include <QComboBox>
 #include <QGroupBox>
 #include <QDoubleSpinBox>
+#include <QScrollArea>
+#include <QTabWidget>
 #include <cstdint>
 
 using std::function;
@@ -86,6 +88,8 @@ public:
 	bool is_usb2() const { return is_usb2_; }
 
 	QSize sizeHint() const override;
+	void show_acquisition_tab();
+	void show_channels_tab();
 
 	QRadioButton* radioChannels[4];
 	QString device_name_;
@@ -134,6 +138,8 @@ private:
 
 	Session &session_;
 	QFormLayout layout_;
+	QFormLayout *acquisition_layout_;
+	QTabWidget *tabs_;
 	bool updating_channels_;
 
 	DeviceMode device_mode_;

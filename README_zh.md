@@ -6,6 +6,8 @@ U3LogicAnalyzer 是配套 CH32H417 / CH569 USB 逻辑分析仪的 PC 上位机�
 PulseView 0.5.0 修改，内置裁剪后的 sigrok 软件栈（libsigrok + libsigrokdecode），
 支持 **130 种协议解码**（I²C / SPI / UART 等）。
 
+![U3LogicAnalyzer 连接 CH32H417 分析仪在 macOS 上运行](docs/images/u3logic-analyzer-macos.png)
+
 ## 功能特性
 
 - **硬件支持**：CH32H417（USB3.0，最高 200MHz 采样）、CH569 热插拔检测
@@ -13,6 +15,7 @@ PulseView 0.5.0 修改，内置裁剪后的 sigrok 软件栈（libsigrok + libsi
   - macOS / Linux：驱动内置 **libusb 传输层**，无需任何内核驱动（协议参考
     WCH 官方 CH37X_LINUX SDK）
 - **固件升级**：IAP 对话框（HID 模式全平台可用；CH375 模式仅 Windows）
+- **软件更新**：通过 GitHub Releases 检查新版本
 - **解码通道分配**对话框
 - 中文界面、深色主题、全新工具栏图标
 - 130 个协议解码器
@@ -92,7 +95,7 @@ cd U3LogicAnalyzer
 解码器会自动发现（优先 .app 内 `Contents/Resources/decoders`，其次安装前缀、
 构建树），无需任何环境变量。
 
-真机验证建议带日志级别运行：
+实机调试时可带日志级别运行：
 
 ```bash
 ./build/pulseview_build/LogicAnalyzer -l 5
@@ -142,11 +145,8 @@ cd build_cmake/logicanalyzer_build && ./LogicAnalyzer.exe   # 运行
 ## 已知限制
 
 - `wch-ch32h417` 驱动的 CH375 驱动模式仅 Windows；macOS / Linux 使用
-  libusb 传输层，**实际采集功能需在真机上验证**（扫描、配置、连续采集、IAP）。
+  libusb 传输层。
 - IAP 的 CH375 模式仅 Windows；HID 模式全平台可用。
-- CH32H417 热插拔通知在非 Windows 平台为 no-op，由启动扫描和 CH569 的
-  libusb 轮询线程兜底。
-- 16 通道模式下解码多路复用（mux）的缩放缓冲已修复除零崩溃，建议真机验证。
 
 ## 相对上游 PulseView 的改动摘要
 

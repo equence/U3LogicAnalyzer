@@ -66,7 +66,9 @@ DeviceManager::DeviceManager(shared_ptr<Context> context,
 	unique_ptr<QProgressDialog> progress(new QProgressDialog("",
 		QObject::tr("Cancel"), 0, context->drivers().size() + 1));
 	progress->setWindowModality(Qt::WindowModal);
-	progress->setMinimumDuration(1);  // To show the dialog immediately
+	// Targeted hot-plug refreshes are normally faster than a second. Avoid a
+	// progress-dialog flash while retaining immediate feedback for full scans.
+	progress->setMinimumDuration(do_scan ? 1 : 1000);
 
 	int entry_num = 1;
 
@@ -263,6 +265,14 @@ DeviceManager::driver_scan(
 
 		// Add the scanned devices to the main list, set display names and sort.
 		for (shared_ptr<sigrok::HardwareDevice>& device : devices) {
+			// The WCH driver can briefly return a placeholder with no vendor
+			// while a replugged analyzer is still settling. It cannot be opened
+			// safely and must never be exposed as an "Unknown device" entry.
+			if (util::get_wch_device_type_by_driver(driver->name()) !=
+					util::WchDeviceType::None &&
+					util::get_wch_device_type(QString::fromStdString(
+						device->vendor())) == util::WchDeviceType::None)
+				continue;
 			const shared_ptr<devices::HardwareDevice> d(
 				new devices::HardwareDevice(context_, device));
 			driver_devices.push_front(d);

@@ -61,6 +61,10 @@ static bool item_selected(shared_ptr<TraceTreeItem> r)
 Header::Header(View &parent) :
 	MarginWidget(parent)
 {
+	setAutoFillBackground(true);
+	QPalette header_palette = palette();
+	header_palette.setColor(QPalette::Window, QColor("#202329"));
+	setPalette(header_palette);
 }
 
 QSize Header::sizeHint() const

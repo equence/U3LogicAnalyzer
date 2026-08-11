@@ -63,7 +63,7 @@ static gint sort_pds(gconstpointer a, gconstpointer b)
 Application::Application(int &argc, char* argv[]) :
 	QApplication(argc, argv)
 {
-	setApplicationVersion(PV_VERSION_STRING);
+	setApplicationVersion(U3LOGIC_VERSION_STRING);
 	setApplicationName("U3LogicAnalyzer");
 	setOrganizationName("LogicAnalyzer");
 	// setOrganizationDomain("sigrok.org");

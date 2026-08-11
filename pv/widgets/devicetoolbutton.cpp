@@ -42,6 +42,15 @@ using pv::devices::Device;
 namespace pv {
 namespace widgets {
 
+static QString concise_device_name(const QString &vendor)
+{
+	if (vendor == "USB3.0(CH32H417)")
+		return "CH32H417";
+	if (vendor == "USB3.0(CH569)")
+		return "CH569";
+	return vendor;
+}
+
 DeviceToolButton::DeviceToolButton(QWidget *parent,
 	DeviceManager *device_manager,
 	QAction *connect_action) :
@@ -52,11 +61,25 @@ DeviceToolButton::DeviceToolButton(QWidget *parent,
 	mapper_(this),
 	devices_()
 {
-	setPopupMode(QToolButton::MenuButtonPopup);
+	setPopupMode(QToolButton::InstantPopup);
 	setMenu(&menu_);
 	setToolTip("");
-
-	connect(this, SIGNAL(clicked()), this, SLOT(on_button_clicked()));
+	setObjectName("deviceSelector");
+	setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+	setIcon(QIcon(":/icons/status-grey.svg"));
+	setIconSize(QSize(10, 10));
+	setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+	menu_.setObjectName("deviceMenu");
+	menu_.setWindowFlags(Qt::Popup | Qt::FramelessWindowHint |
+		Qt::NoDropShadowWindowHint);
+	menu_.setAttribute(Qt::WA_TranslucentBackground, true);
+	menu_.setStyleSheet(
+		"QMenu#deviceMenu { padding: 4px; background: #25282e;"
+		" border: 1px solid #414650; color: #dce1e8; font-size: 12px; }"
+		"QMenu#deviceMenu::item { height: 28px; padding: 0 14px;"
+		" margin: 0; border-radius: 5px; background: transparent; }"
+		"QMenu#deviceMenu::item:selected { background: #343943; color: #ffffff; }"
+	);
 
 	connect(&mapper_, SIGNAL(mapped(QObject*)),
 		this, SLOT(on_action(QObject*)));
@@ -64,7 +87,8 @@ DeviceToolButton::DeviceToolButton(QWidget *parent,
 	connect(&menu_, SIGNAL(hovered(QAction*)),
 		this, SLOT(on_menu_hovered(QAction*)));
 
-	setMinimumWidth(QFontMetrics(font()).averageCharWidth() * 16);
+	setMinimumWidth(QFontMetrics(font()).averageCharWidth() * 22);
+	setFixedHeight(32);
 }
 
 shared_ptr<Device> DeviceToolButton::selected_device()
@@ -72,40 +96,62 @@ shared_ptr<Device> DeviceToolButton::selected_device()
 	return selected_device_;
 }
 
+QString DeviceToolButton::selected_vendor() const
+{
+	return selected_vendor_;
+}
+
 void DeviceToolButton::set_device_list(
 	const list< shared_ptr<Device> > &devices, shared_ptr<Device> selected)
 {
 	selected_device_ = selected;
+	selected_vendor_ = selected ? QString::fromStdString(
+		selected->device()->vendor()) : QString();
+	setIcon(QIcon(selected ? ":/icons/status-green.svg" :
+		":/icons/status-grey.svg"));
 	setText(selected ? QString::fromStdString(
-		selected->display_name(*device_manager_)) : tr("<No Device>"));
+		selected->display_name(*device_manager_)) : tr("Not connected"));
 	devices_ = vector< weak_ptr<Device> >(devices.begin(), devices.end());
 	update_device_list();
 }
 
 void DeviceToolButton::reset()
 {
-	setText(tr("<No Device>"));
+	set_not_connected();
 }
 
-void DeviceToolButton::set_device_list_name(QString &device_list_name)
+void DeviceToolButton::set_not_connected()
+{
+	selected_device_.reset();
+	selected_vendor_.clear();
+	setIcon(QIcon(":/icons/status-grey.svg"));
+	devices_.clear();
+	menu_.clear();
+	setText(tr("Not connected"));
+}
+
+void DeviceToolButton::set_device_list_name(const QString &device_list_name)
 {
 	setText(device_list_name);
+	update_device_list();
 }
 
 void DeviceToolButton::update_device_list()
 {
 	menu_.clear();
+	menu_.setMinimumWidth(width());
 
 	for (weak_ptr<Device>& dev_weak_ptr : devices_) {
 		shared_ptr<Device> dev(dev_weak_ptr.lock());
 		if (!dev)
 			continue;
 
-		QAction *const a = new QAction(QString::fromStdString(
-			dev->display_name(*device_manager_)), this);
-		a->setCheckable(true);
-		a->setChecked(selected_device_ == dev);
+		const QString vendor = QString::fromStdString(dev->device()->vendor());
+		const QString label = (selected_device_ == dev && !text().isEmpty()) ?
+			text() : concise_device_name(vendor);
+		QAction *const a = new QAction(label, &menu_);
 		a->setData(QVariant::fromValue((void*)dev.get()));
+		a->setProperty("deviceVendor", vendor);
 		a->setToolTip(QString::fromStdString(dev->full_name()));
 		mapper_.setMapping(a, a);
 
@@ -124,9 +170,14 @@ void DeviceToolButton::on_action(QObject *action)
 {
 	assert(action);
 
-	selected_device_.reset();
+	QAction *selected_action = qobject_cast<QAction*>(action);
+	Device *const dev = (Device*)selected_action->data().value<void*>();
+	if (selected_device_.get() == dev) {
+		setText(selected_action->text());
+		return;
+	}
 
-	Device *const dev = (Device*)((QAction*)action)->data().value<void*>();
+	selected_device_.reset();
 	for (weak_ptr<Device>& dev_weak_ptr : devices_) {
 		shared_ptr<Device> dev_ptr(dev_weak_ptr);
 		if (dev_ptr.get() == dev) {
@@ -134,10 +185,13 @@ void DeviceToolButton::on_action(QObject *action)
 			break;
 		}
 	}
+	if (!selected_device_) {
+		set_not_connected();
+		return;
+	}
 
-	update_device_list();
-	setText(QString::fromStdString(
-		selected_device_->display_name(*device_manager_)));
+	selected_vendor_ = selected_action->property("deviceVendor").toString();
+	setText(selected_action->text());
 	device_selected();
 }
 
@@ -164,11 +218,6 @@ void DeviceToolButton::on_menu_hover_timeout()
 		return;
 
 	QToolTip::showText(QCursor::pos(), device_tooltip_);
-}
-
-void DeviceToolButton::on_button_clicked()
-{
-	menu_.exec(mapToGlobal(QPoint(0, height())));
 }
 
 }  // namespace widgets

@@ -170,10 +170,9 @@ public:
 	void restore_setup(QSettings &settings);
 	void restore_settings(QSettings &settings);
 	void device_detached();
+	void disconnect_device();
 
-	/**
-	 * Attempts to set device instance, may fall back to demo if needed
-	 */
+	/** Attempts to set the requested device instance. */
 	void select_device(shared_ptr<devices::Device> device);
 
 	/**
@@ -222,12 +221,6 @@ public:
 	shared_ptr<data::DecodeSignal> add_decode_signal();
 
 	void remove_decode_signal(shared_ptr<data::DecodeSignal> signal);
-
-	/**
-	 * Creates a default UART decoder for demo device with baudrate 115200
-	 * and TX channel mapped to D0.
-	 */
-	void create_demo_uart_decoder();
 #endif
 
 	bool all_segments_complete(uint32_t segment_id) const;

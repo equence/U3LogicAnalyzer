@@ -58,10 +58,10 @@ const QColor SignalBase::AnalogSignalColors[8] =
 
 const QColor SignalBase::LogicSignalColors[4] =
 {
-	QColor(170, 0, 0),
-	QColor(180, 160, 50),
-	QColor(65, 105, 225),
-	QColor(50, 120, 70),
+	QColor(0xFF, 0x6B, 0x6B),
+	QColor(0xFF, 0xD1, 0x66),
+	QColor(0x6D, 0xB7, 0xFF),
+	QColor(0x55, 0xD6, 0xA3),
 };
 
 const int SignalBase::ColorBGAlpha = 8 * 256 / 100;

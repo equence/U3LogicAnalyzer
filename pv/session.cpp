@@ -531,20 +531,6 @@ void Session::restore_settings(QSettings &settings)
 
 	const QString device_type = settings.value("device_type").toString();
 	if (device_type == "USB3.0(CH569) Logic" || device_type == "USB3.0(CH32H417) Logic") {
-		bool already_demo = false;
-		if (device_) {
-			shared_ptr<devices::HardwareDevice> hw_dev =
-				dynamic_pointer_cast<devices::HardwareDevice>(device_);
-			if (hw_dev && hw_dev->hardware_device()->driver()->name() == "demo") {
-				already_demo = true;
-				qDebug() << "Current device is already demo, skipping restore_settings";
-			}
-		}
-
-		if (already_demo) {
-			return;
-		}
-
 		const list< shared_ptr<devices::HardwareDevice> > &devices =
 			device_manager_.load()->devices();
 
@@ -565,26 +551,13 @@ void Session::restore_settings(QSettings &settings)
 			qDebug() << "Found connected device, using it instead of saved settings";
 		}
 
-		if (device)
-			set_device(device);
-		else {
-			// 没有找到任何设备，使用默认设备选择demo
-			qDebug() << "No device found, selecting default device";
-			set_default_device();
+		if (!device) {
+			qDebug() << "No supported analyzer found; keeping the session disconnected";
+			return;
 		}
 
-		bool is_demo = false;
-		if (device_) {
-			shared_ptr<devices::HardwareDevice> hw_dev =
-				dynamic_pointer_cast<devices::HardwareDevice>(device_);
-			if (hw_dev && hw_dev->hardware_device()->driver()->name() == "demo") {
-				is_demo = true;
-			}
-		}
-
-		if (!is_demo) {
-			restore_setup(settings);
-		}
+		set_device(device);
+		restore_setup(settings);
 	}
 #if 0
 	QString filename;
@@ -1182,91 +1155,6 @@ void Session::remove_decode_signal(shared_ptr<data::DecodeSignal> signal)
 	signals_changed();
 }
 
-void Session::create_demo_uart_decoder()
-{
-	const srd_decoder* uart_decoder = nullptr;
-	for (GSList* li = (GSList*)srd_decoder_list(); li; li = li->next) {
-		const srd_decoder* d = (srd_decoder*)li->data;
-		if (strcmp(d->id, "uart") == 0) {
-			uart_decoder = d;
-			break;
-		}
-	}
-
-	if (!uart_decoder) {
-		qDebug() << "UART decoder not found";
-		return;
-	}
-
-	if (views_.empty()) {
-		qDebug() << "Views not ready, cannot create decoder";
-		return;
-	}
-
-	shared_ptr<data::DecodeSignal> signal = add_decode_signal();
-	if (!signal) {
-		return;
-	}
-
-	signal->stack_decoder(uart_decoder, false);
-
-	// Auto-assign TX→D0, RX→D1 for demo device
-	// Use assign_signal_no_decode to avoid premature begin_decode()
-	{
-		shared_ptr<data::SignalBase> d0, d1;
-		for (const shared_ptr<data::SignalBase>& sb : signalbases_) {
-			if (sb->internal_name() == "D0") d0 = sb;
-			if (sb->internal_name() == "D1") d1 = sb;
-		}
-		const auto channels = signal->get_channels();
-		for (const auto& ch : channels) {
-			QString ch_name = ch.name.toLower();
-			if (ch_name.contains("tx") && d0)
-				signal->assign_signal_no_decode(ch.id, d0);
-			else if (ch_name.contains("rx") && d1)
-				signal->assign_signal_no_decode(ch.id, d1);
-		}
-	}
-
-	// Set baudrate=115200
-	for (GSList* l = uart_decoder->options; l; l = l->next) {
-		const srd_decoder_option* opt = (srd_decoder_option*)l->data;
-		if (strcmp(opt->id, "baudrate") == 0) {
-			GVariant* baud_value = nullptr;
-			if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE_UINT64)) {
-				baud_value = g_variant_new_uint64(115200);
-			} else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE_UINT32)) {
-				baud_value = g_variant_new_uint32(115200);
-			} else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE_INT64)) {
-				baud_value = g_variant_new_int64(115200);
-			} else if (g_variant_is_of_type(opt->def, G_VARIANT_TYPE_INT32)) {
-				baud_value = g_variant_new_int32(115200);
-			} else {
-				qDebug() << "Unknown baudrate type, using default";
-				continue;
-			}
-			if (baud_value && !signal->decoder_stack().empty()) {
-				signal->decoder_stack().back()->set_option("baudrate", baud_value);
-			}
-			break;
-		}
-	}
-
-	// Set data_format to ascii
-	for (GSList* l = uart_decoder->options; l; l = l->next) {
-		const srd_decoder_option* opt = (srd_decoder_option*)l->data;
-		if (strcmp(opt->id, "format") == 0) {
-			GVariant* format_value = g_variant_new_string("ascii");
-			if (format_value && !signal->decoder_stack().empty()) {
-				signal->decoder_stack().back()->set_option("format", format_value);
-			}
-			break;
-		}
-	}
-
-	// All configuration done, start decode once
-	signal->begin_decode();
-}
 #endif
 
 bool Session::all_segments_complete(uint32_t segment_id) const
@@ -1804,7 +1692,7 @@ void Session::feed_in_logic(shared_ptr<sigrok::Logic> logic)
 			logic->unit_size() , cur_samplerate_,
 			main_bar_->get_sample_count());
 		logic_data_->push_segment(cur_logic_segment_);
-		if (!is_wch_device(main_bar_->get_vendorName()) && main_bar_->get_vendorName() != "demo") {
+		if (!is_wch_device(main_bar_->get_vendorName())) {
 			logic_channel_count_ = 16;
 		} else {
 			logic_channel_count_ = main_bar_->get_channel_number();
@@ -1898,9 +1786,16 @@ void Session::feed_in_analog(shared_ptr<sigrok::Analog> analog)
 }
 void Session::device_detached()
 {
-	// set_capture_state(Stopped);
-	// stop_capture();
-	main_bar_->reset_device_selector();
+	disconnect_device();
+}
+
+void Session::disconnect_device()
+{
+	stop_capture();
+	if (device_)
+		device_->close();
+	device_.reset();
+	device_changed();
 }
 
 void Session::data_feed_in(shared_ptr<sigrok::Device> device,

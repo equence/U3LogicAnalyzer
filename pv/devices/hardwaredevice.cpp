@@ -97,7 +97,7 @@ string HardwareDevice::display_name(
 	if (device_->vendor().length() > 0)
 		parts.push_back(device_->vendor());
 	else
-		parts.push_back("Demo device");
+		parts.push_back("Unknown device");
 	// if (device_->model().length() > 0)
 	// 	parts.push_back(device_->model());
 

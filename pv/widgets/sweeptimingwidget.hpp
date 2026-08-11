@@ -27,6 +27,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QWidget>
 #include <vector>
@@ -66,6 +67,7 @@ public:
 	uint16_t get_current_index();
 	void set_time_value(uint64_t value, uint64_t sampleRate);
 	void set_current_index(uint16_t index);
+	void set_prefix_text(const QString &text);
 
 Q_SIGNALS:
 	void value_changed();
@@ -74,6 +76,7 @@ private:
 	const char *const suffix_;
 
 	QHBoxLayout layout_;
+	QLabel prefix_;
 
 	QDoubleSpinBox value_;
 	QComboBox list_;

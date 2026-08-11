@@ -52,6 +52,8 @@ void Binding::commit()
 void Binding::add_properties_to_form(QFormLayout *layout, bool auto_commit)
 {
 	assert(layout);
+	layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
 	help_labels_.clear();
 
@@ -90,7 +92,7 @@ void Binding::add_properties_to_form(QFormLayout *layout, bool auto_commit)
 			layout->addRow(widget);
 		} else {
 			auto *lbl = new QLabel(p->name());
-			lbl->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+			lbl->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
 			layout->addRow(lbl, widget);
 		}
 

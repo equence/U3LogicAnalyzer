@@ -128,62 +128,31 @@ void Trace::on_setting_changed(const QString &key, const QVariant &value)
 
 void Trace::paint_label(QPainter &p, const QRect &rect, bool hover)
 {
-	int y = get_visual_y();
-	p.setBrush(base_->color());
-	QPointF Point;
 	if (!enabled())
 		return;
 
-	QRectF r = label_rect(rect);
-	if (base_->type() == base_->LogicChannel){
-		const pair<int, int> extents = v_extents();
-		const int top = get_visual_y() + extents.first;
-		const int btm = get_visual_y() + extents.second;
-		y = top + ((btm - top) / 2.0);
-	}
+	QRectF r = label_rect(rect).adjusted(1, 2, -2, -2);
 	// When selected, move the arrow to the left so that the border can show
 	const QPointF offs = (selected()) ? QPointF(-2, 0) : QPointF(0, 0);
-
-	// Paint the label
-	const float label_arrow_length = r.height() / 2;
-	QPointF points[] = {
-		offs + r.topLeft(),
-		offs + QPointF(r.right() - label_arrow_length, r.top()),
-		offs + QPointF(r.right(), y),
-		offs + QPointF(r.right() - label_arrow_length, r.bottom()),
-		offs + r.bottomLeft()
-	};
-	QPointF highlight_points[] = {
-		offs + QPointF(r.left() + 1, r.top() + 1),
-		offs + QPointF(r.right() - label_arrow_length, r.top() + 1),
-		offs + QPointF(r.right() - 1, y),
-		offs + QPointF(r.right() - label_arrow_length, r.bottom() - 1),
-		offs + QPointF(r.left() + 1, r.bottom() - 1)
-	};
+	r.translate(offs);
 
 	if (selected()) {
 		p.setPen(highlight_pen());
-		p.setBrush(Qt::transparent);
-		p.drawPolygon(points, countof(points));
+		p.setBrush(QColor("#30343b"));
+		p.drawRoundedRect(r.adjusted(-1, -1, 1, 1), 7, 7);
 	}
 
-	p.setPen(Qt::transparent);
-	p.setBrush(hover ? base_->color().lighter() : base_->color());
-	p.drawPolygon(points, countof(points));
-
-	p.setPen(base_->color().lighter());
-	p.setBrush(Qt::transparent);
-	p.drawPolygon(highlight_points, countof(highlight_points));
-
-	p.setPen(base_->color().darker());
-	p.setBrush(Qt::transparent);
-	p.drawPolygon(points, countof(points));
+	p.setPen(QPen(hover ? QColor("#59616e") : QColor("#3a404a"), 1));
+	p.setBrush(hover ? QColor("#343943") : QColor("#292d34"));
+	p.drawRoundedRect(r, 6, 6);
+	p.setPen(Qt::NoPen);
+	p.setBrush(base_->color());
+	p.drawRoundedRect(QRectF(r.left() + 4, r.top() + 5, 3, r.height() - 10), 1.5, 1.5);
 
 	// Paint the text
-	p.setPen(select_text_color(base_->color()));
+	p.setPen(QColor("#e2e6ec"));
 	p.setFont(QApplication::font());
-	p.drawText(QRectF(r.x(), r.y(),
-		r.width() - label_arrow_length, r.height()),
+	p.drawText(r.adjusted(10, 0, -5, 0),
 		Qt::AlignCenter | Qt::AlignVCenter, base_->name());
 }
 
@@ -326,20 +295,7 @@ void Trace::hover_point_changed(const QPoint &hp)
 void Trace::paint_back(QPainter &p, ViewItemPaintParams &pp)
 {
 	if (base_->type() == base_->LogicChannel) {
-		GlobalSettings settings;
-		QPen pen;
-		pen.setStyle(Qt::DashLine);
-
-		if (settings.current_theme_is_dark()){
-			dark.setAlpha(100);
-			pen.setColor(dark);
-		}
-		else{
-			bright.setAlpha(100);
-			pen.setColor(bright);
-		}
-
-		p.setPen(pen);
+		p.setPen(QPen(QColor(72, 78, 89, 115), 1, Qt::SolidLine));
 		const pair<int, int> extents = v_extents();
 		const int top = get_visual_y() + extents.first;
 		const int btm = get_visual_y() + extents.second;

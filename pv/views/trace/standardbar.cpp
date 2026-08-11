@@ -56,7 +56,7 @@ StandardBar::StandardBar(Session &session, QWidget *parent,
 	segment_selector_(new QSpinBox(this))
 {
 	setObjectName(QString::fromUtf8("StandardBar"));
-	setIconSize(QSize(32, 32));
+	setIconSize(QSize(24, 24));
 	// Actions
 	action_view_zoom_in_->setText(tr("Zoom &In"));
 	action_view_zoom_in_->setIcon(QIcon::fromTheme("zoom-in",
@@ -82,14 +82,15 @@ StandardBar::StandardBar(Session &session, QWidget *parent,
 		this, SLOT(on_actionViewZoomFit_triggered(bool)));
 
 	action_view_show_cursors_->setCheckable(true);
-	action_view_show_cursors_->setIcon(QIcon(":/icons/show-cursors.png"));
+	action_view_show_cursors_->setIcon(QIcon(":/icons/measure.svg"));
 	action_view_show_cursors_->setShortcut(QKeySequence(Qt::Key_C));
 	connect(action_view_show_cursors_, SIGNAL(triggered(bool)),
 		this, SLOT(on_actionViewShowCursors_triggered()));
 	action_view_show_cursors_->setText(tr("Show &Cursors"));
 	show_cursors_->setDefaultAction(action_view_show_cursors_);
-	show_cursors_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-	show_cursors_->setText(tr("Show Cursors"));
+	show_cursors_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+	show_cursors_->setToolTip(tr("Show Cursors"));
+	show_cursors_->setFixedSize(32, 32);
 
 	action_sdm_last_->setIcon(QIcon(":/icons/view-displaymode-last_segment.svg"));
 	action_sdm_last_->setText(tr("Display last segment only"));

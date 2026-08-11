@@ -20,9 +20,11 @@
 
 set(pulseview_TEST_SOURCES
 	${PROJECT_SOURCE_DIR}/pv/application.cpp
+	${PROJECT_SOURCE_DIR}/pv/devicepresence.cpp
 	${PROJECT_SOURCE_DIR}/pv/devicemanager.cpp
 	${PROJECT_SOURCE_DIR}/pv/globalsettings.cpp
 	${PROJECT_SOURCE_DIR}/pv/logging.cpp
+	${PROJECT_SOURCE_DIR}/pv/softwareupdate.cpp
 	${PROJECT_SOURCE_DIR}/pv/mainwindow.cpp
 	${PROJECT_SOURCE_DIR}/pv/metadata_obj.cpp
 	${PROJECT_SOURCE_DIR}/pv/session.cpp
@@ -45,6 +47,8 @@ set(pulseview_TEST_SOURCES
 	${PROJECT_SOURCE_DIR}/pv/devices/inputfile.cpp
 	${PROJECT_SOURCE_DIR}/pv/devices/sessionfile.cpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/connect.cpp
+	${PROJECT_SOURCE_DIR}/pv/dialogs/decoder_channel_dialog.cpp
+	${PROJECT_SOURCE_DIR}/pv/dialogs/iapdialog.cpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/inputoutputoptions.cpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/settings.cpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/storeprogress.cpp
@@ -98,6 +102,8 @@ set(pulseview_TEST_SOURCES
 	data/analogsegment.cpp
 	data/logicsegment.cpp
 	data/segment.cpp
+	devicepresence.cpp
+	softwareupdate.cpp
 	view/ruler.cpp
 	test.cpp
 	util.cpp
@@ -123,6 +129,8 @@ set(pulseview_TEST_HEADERS
 	${PROJECT_SOURCE_DIR}/pv/data/signalbase.hpp
 	${PROJECT_SOURCE_DIR}/pv/devices/device.hpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/connect.hpp
+	${PROJECT_SOURCE_DIR}/pv/dialogs/decoder_channel_dialog.hpp
+	${PROJECT_SOURCE_DIR}/pv/dialogs/iapdialog.hpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/inputoutputoptions.hpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/settings.hpp
 	${PROJECT_SOURCE_DIR}/pv/dialogs/storeprogress.hpp
@@ -213,4 +221,3 @@ add_executable(pulseview-test
 )
 
 target_link_libraries(pulseview-test ${PULSEVIEW_LINK_LIBS})
-

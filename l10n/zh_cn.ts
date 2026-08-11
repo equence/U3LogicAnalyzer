@@ -502,6 +502,18 @@ Do you want to save the session?</source>
         <source>Cancel</source>
         <translation type="vanished">取消</translation>
     </message>
+    <message><source>File</source><translation>文件</translation></message>
+    <message><source>Preferences...</source><translation>偏好设置...</translation></message>
+    <message><source>Quit</source><translation>退出</translation></message>
+    <message><source>Device</source><translation>设备</translation></message>
+    <message><source>Refresh Devices</source><translation>刷新设备</translation></message>
+    <message><source>Acquisition</source><translation>采集</translation></message>
+    <message><source>Start / Stop</source><translation>开始 / 停止</translation></message>
+    <message><source>View</source><translation>视图</translation></message>
+    <message><source>Add Protocol Decoder</source><translation>添加协议解码器</translation></message>
+    <message><source>Help</source><translation>帮助</translation></message>
+    <message><source>Device disconnected</source><translation>设备已断开</translation></message>
+    <message><source>The analyzer was disconnected. Captured data has been kept.</source><translation>分析仪已断开，已采集的数据仍会保留。</translation></message>
 </context>
 <context>
     <name>pv::Session</name>
@@ -1804,6 +1816,9 @@ PulseView可能需要重新启动才能正确显示。</translation>
         <source>Use 4 channels (Max 40MHz)</source>
         <translation>使用4通道 (最高 40MHz)</translation>
     </message>
+    <message><source>Acquisition</source><translation>采集</translation></message>
+    <message><source>Channels</source><translation>通道</translation></message>
+    <message><source>Configuration</source><translation>配置</translation></message>
 </context>
 <context>
     <name>pv::prop::Bool</name>
@@ -2351,6 +2366,39 @@ PulseView可能需要重新启动才能正确显示。</translation>
         <source>Total sampling time: %1</source>
         <translation type="vanished">总采样时间： %1</translation>
     </message>
+    <message><source>Not connected</source><translation>未连接</translation></message>
+    <message><source>Device Status: Not connected</source><translation>设备状态：未连接</translation></message>
+    <message><source>Connected</source><translation>已连接</translation></message>
+    <message><source>Device Status: Connected</source><translation>设备状态：已连接</translation></message>
+    <message><source>Capture file</source><translation>采集文件</translation></message>
+    <message><source>Select analyzer</source><translation>选择分析仪</translation></message>
+    <message><source>Duration</source><translation>时长</translation></message>
+    <message><source>Sample rate</source><translation>采样率</translation></message>
+    <message><source>Single</source><translation>单次</translation></message>
+    <message><source>Single acquisition</source><translation>单次采集</translation></message>
+    <message><source>Repeat</source><translation>重复</translation></message>
+    <message><source>Repeat acquisition</source><translation>重复采集</translation></message>
+    <message><source>Channel Configuration</source><translation>通道配置</translation></message>
+    <message><source>Version Info</source><translation>版本信息</translation></message>
+    <message><source>Firmware Update</source><translation>固件更新</translation></message>
+    <message><source>Checking for Updates...</source><translation>正在检查更新...</translation></message>
+    <message><source>Software Update</source><translation>软件更新</translation></message>
+    <message><source>Unable to check for updates.
+%1</source><translation>无法检查更新。
+%1</translation></message>
+    <message><source>GitHub returned an invalid update response.
+%1</source><translation>GitHub 返回了无效的更新信息。
+%1</translation></message>
+    <message><source>A new version is available.
+
+Current: %1
+Latest: %2</source><translation>发现新版本。
+
+当前版本：%1
+最新版本：%2</translation></message>
+    <message><source>Open Release Page</source><translation>打开发布页面</translation></message>
+    <message><source>U3LogicAnalyzer %1 is up to date.</source><translation>U3LogicAnalyzer %1 已是最新版本。</translation></message>
+    <message><source>User Guide</source><translation>使用指南</translation></message>
 </context>
 <context>
     <name>pv::views</name>
@@ -3571,6 +3619,7 @@ until (condition)
         <source>&lt;No Device&gt;</source>
         <translation></translation>
     </message>
+    <message><source>Not connected</source><translation>未连接</translation></message>
 </context>
 <context>
     <name>pv::widgets::ExportMenu</name>

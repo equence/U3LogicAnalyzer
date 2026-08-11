@@ -105,18 +105,7 @@ LogicSignal::LogicSignal(pv::Session &session, shared_ptr<data::SignalBase> base
 	high_fill_color_ = QColor::fromRgba(settings.value(
 		GlobalSettings::Key_View_FillSignalHighAreaColor).value<uint32_t>());
 
-	if (settings.value(GlobalSettings::Key_General_Theme).toInt() == 1){
-		EdgeColor = QColor(0xFF, 0xFB, 0xF0);
-		HighColor = QColor(0xFF, 0xFB, 0xF0);
-		LowColor = QColor(0xFF, 0xFB, 0xF0);
-		SamplingPointColor = QColor(0xFF, 0xFF, 0xF0);
-	}else{
-		EdgeColor = QColor(0x00, 0x00, 0x00);
-		HighColor = QColor(0x00, 0x00, 0x00);
-		LowColor = QColor(0x00, 0x00, 0x00);
-		SamplingPointColor = QColor(0x77, 0x77, 0x77);
-	}
-	EdgeColor.setAlpha(255); HighColor.setAlpha(255); LowColor.setAlpha(255); SamplingPointColor.setAlpha(255);
+	update_trace_colors(base_->color());
 	update_logic_level_offsets();
 
 	/* Populate this channel's trigger setting with whatever we
@@ -128,6 +117,28 @@ LogicSignal::LogicSignal(pv::Session &session, shared_ptr<data::SignalBase> base
 				if (match->channel() == base_->channel())
 					trigger_match_ = match->type();
 	connect(base.get(), SIGNAL(set_none_trigger()), this, SLOT(on_set_none_trigger()));
+}
+
+void LogicSignal::update_trace_colors(const QColor &color)
+{
+	GlobalSettings settings;
+	const bool dark_theme =
+		settings.value(GlobalSettings::Key_General_Theme).toInt() == 1;
+	const QColor trace_color = dark_theme ? color.lighter(115) : color.darker(115);
+	EdgeColor = trace_color;
+	HighColor = trace_color;
+	LowColor = trace_color;
+	SamplingPointColor = dark_theme ? color.lighter(135) : color.darker(135);
+	EdgeColor.setAlpha(255);
+	HighColor.setAlpha(255);
+	LowColor.setAlpha(255);
+	SamplingPointColor.setAlpha(255);
+}
+
+void LogicSignal::on_color_changed(const QColor &color)
+{
+	update_trace_colors(color);
+	Trace::on_color_changed(color);
 }
 
 std::map<QString, QVariant> LogicSignal::save_settings() const

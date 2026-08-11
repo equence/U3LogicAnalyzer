@@ -213,9 +213,11 @@ int main(int argc, char *argv[])
 #endif
 
 	Application a(argc, argv);
+#ifdef _WIN32
 	QFont currentFont = a.font();
 	currentFont.setFamily("Microsoft YaHei");
 	a.setFont(currentFont);
+#endif
 
 #ifdef ANDROID
 	srau_init_environment();

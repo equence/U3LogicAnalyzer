@@ -42,7 +42,6 @@
 #include <pv/widgets/devicetoolbutton.hpp>
 #include <pv/widgets/popuptoolbutton.hpp>
 #include <pv/widgets/sweeptimingwidget.hpp>
-#include <thread>
 #include <mutex>
 #include <QFile>
 #include <libusb.h>
@@ -98,7 +97,6 @@ private:
 	 * containing the last file that was saved.
 	 */
 	static const char *SettingSaveDirectory;
-	std::thread t_hot_plug;
 	QString m_vendorName;
 	std::mutex vendorName_mutex;
 	
@@ -121,6 +119,14 @@ public:
 	QAction* action_restore_setup() const;
 	QAction* action_save_setup() const;
 	QAction* action_connect() const;
+	QAction* action_single() const;
+	QAction* action_repeat() const;
+	QAction* action_device_options() const;
+	QAction* action_channel_configuration() const;
+	QAction* action_version_info() const;
+	QAction* action_update() const;
+	QAction* action_software_update() const;
+	QAction* action_user_guide() const;
 	
 	uint64_t get_sample_count();
 	uint64_t get_sample_rate();
@@ -129,8 +135,6 @@ public:
 	uint64_t get_trigger_offset();
 	uint16_t get_sample_count_index();
 	void set_device_selector_name(QString device_selector);
-	void hot_plug_start();
-	void hot_plug_stop();
 	void set_vendorName(QString vendorName);
 	QString get_vendorName();
 	
@@ -149,7 +153,6 @@ private:
 	void commit_sample_count();
 	void commit_channel_number(uint64_t channelNum);
 	void commit_threshold_value(int index, float thresholdLevel);
-	void hot_plug_listen();
 	void renew_samplecount_samplerate(uint64_t samplerate,uint64_t samplerate_max);
 	void get_decoder_list_default(QString decoder_name);
 
@@ -177,6 +180,7 @@ private Q_SLOTS:
 	void on_action_version_info_triggered();
     void on_action_feedback_triggered();
     void on_action_update_triggered();
+	void on_action_software_update_triggered();
 	void on_action_use_guide_triggered();
     void on_action_about_triggered();
 
@@ -235,6 +239,14 @@ private:
 	QAction *const action_restore_setup_;
 	QAction *const action_save_setup_;
 	QAction *const action_connect_;
+	QAction *const action_single_;
+	QAction *const action_repeat_;
+	QAction *const action_device_options_;
+	QAction *const action_channel_configuration_;
+	QAction *const action_version_info_;
+	QAction *const action_update_;
+	QAction *const action_software_update_;
+	QAction *const action_user_guide_;
 
 	QToolButton *run_stop_button_;
 	QToolButton *model_change_button_;
@@ -258,7 +270,6 @@ private:
 
 	bool sample_count_supported_;
 
-	atomic<bool> hot_plug_listen_;
 	bool iap_upgrading_;
 
 	bool is_count_setting_default_;

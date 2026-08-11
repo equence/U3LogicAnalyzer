@@ -25,6 +25,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <set>
 
 #include <QMainWindow>
 #include <QShortcut>
@@ -32,7 +33,9 @@
 #include <QToolButton>
 #include <QString>
 #include <QCheckBox>
+#include <QTimer>
 #include <future>
+#include "devicepresence.hpp"
 #include "devicemanager.hpp"
 #include "session.hpp"
 #include "subwindows/subwindowbase.hpp"
@@ -43,6 +46,7 @@ using std::shared_ptr;
 using std::string;
 
 struct srd_decoder;
+struct libusb_context;
 
 class QVBoxLayout;
 
@@ -105,9 +109,11 @@ public:
 	void save_sessions();
 	void restore_sessions();
 	void add_default_setting();
+	bool analyzer_present(const QString &vendor) const;
 
 private:
 	void setup_ui();
+	void setup_application_menu(toolbars::MainBar *main_bar);
 	void update_acq_button(Session *session);
 
 	void save_ui_settings();
@@ -132,11 +138,17 @@ public Q_SLOTS:
 	void show_device_detach();
 	void on_get_repeat_acquisition(bool& is_repeat_acquisition_state);
 	void on_device_attached();
+	void refresh_devices_now();
 
 private:
 	void do_device_detach_switch();
+	void start_device_monitoring();
+	bool read_usb_snapshot(std::set<UsbDeviceIdentity> &snapshot) const;
+	void set_not_connected();
 	
 private Q_SLOTS:
+	void poll_hardware_devices();
+	void refresh_hardware_devices();
 	void on_add_view(ViewType type, Session *session);
 
 	void on_focus_changed();
@@ -200,7 +212,16 @@ private:
 	QString using_device_name;
 	bool is_repeat_acq_ = false;
 	bool is_wch_device_ = false;
-	bool attach_process_done = true;
+	QTimer device_poll_timer_;
+	QTimer device_refresh_timer_;
+	libusb_context *usb_context_ = nullptr;
+	std::set<UsbDeviceIdentity> observed_usb_devices_;
+	bool usb_snapshot_initialized_ = false;
+	bool usb_error_reported_ = false;
+	bool reconnect_requires_selection_ = false;
+	PresenceChange pending_presence_change_ = PresenceChange::Unchanged;
+	int device_scan_retries_ = 0;
+	bool application_menu_initialized_ = false;
 };
 
 } // namespace pv

@@ -58,6 +58,9 @@ Viewport::Viewport(View &parent) :
 {
 	setAutoFillBackground(true);
 	setBackgroundRole(QPalette::Base);
+	QPalette viewport_palette = palette();
+	viewport_palette.setColor(QPalette::Base, QColor("#17191d"));
+	setPalette(viewport_palette);
 
 	// Set up settings and event handlers
 	GlobalSettings settings;
@@ -208,6 +211,12 @@ void Viewport::paintEvent(QPaintEvent*)
 		[](const shared_ptr<TimeItem> &t) { return !t; }));
 
 	QPainter p(this);
+	p.fillRect(rect(), QColor("#17191d"));
+	p.setPen(QPen(QColor(36, 40, 49, 150), 1));
+	for (int x = 32; x < width(); x += 32)
+		p.drawLine(x, 0, x, height());
+	for (int y = 32; y < height(); y += 32)
+		p.drawLine(0, y, width(), y);
 
 	// Disable antialiasing for high-DPI displays
 	bool use_antialiasing =

@@ -179,6 +179,10 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	uint16_t vid, pid;
 
 	drvc = di->context;
+	/* A hot-plug rescan must not retain sr_dev_inst objects or CH375 handles
+	 * belonging to the device that was unplugged. */
+	if (drvc->instances)
+		sr_dev_clear(di);
 
 	conn = NULL;
 	for (l = options; l; l = l->next)
@@ -297,9 +301,20 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 }
 
 /* 清理设备 */
+static void clear_helper(void *priv)
+{
+	struct dev_context *devc = priv;
+
+	if (devc && devc->device_handle &&
+			devc->device_handle != CH375_INVALID_HANDLE) {
+		ch375_close_device(devc->device_index);
+		devc->device_handle = NULL;
+	}
+}
+
 static int dev_clear(const struct sr_dev_driver *di)
 {
-	return std_dev_clear(di);
+	return std_dev_clear_with_callback(di, clear_helper);
 }
 
 /* 打开设备 */

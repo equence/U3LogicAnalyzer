@@ -594,6 +594,7 @@ struct ch375_device {
 	struct libusb_transfer *active[CH375_MAX_PIPES];
 	uint32_t active_size[CH375_MAX_PIPES];
 	uint8_t read_enabled[CH375_MAX_PIPES];
+	uint32_t callbacks_active;
 };
 
 static libusb_context *ch375_ctx = NULL;
@@ -628,6 +629,7 @@ static void LIBUSB_CALL ch375_read_cb(struct libusb_transfer *tr)
 	uint8_t resubmit = 0;
 
 	pthread_mutex_lock(&dev->lock);
+	dev->callbacks_active++;
 	dev->active[pipe] = NULL;
 
 	if (tr->status == LIBUSB_TRANSFER_COMPLETED && tr->actual_length > 0) {
@@ -654,11 +656,15 @@ static void LIBUSB_CALL ch375_read_cb(struct libusb_transfer *tr)
 	g_free(ac);
 	libusb_free_transfer(tr);
 
-	pthread_cond_broadcast(&dev->cond);
 	pthread_mutex_unlock(&dev->lock);
 
 	if (resubmit)
 		ch375_submit_read(dev, pipe);
+
+	pthread_mutex_lock(&dev->lock);
+	dev->callbacks_active--;
+	pthread_cond_broadcast(&dev->cond);
+	pthread_mutex_unlock(&dev->lock);
 }
 
 static int ch375_submit_read(struct ch375_device *dev, uint8_t pipe)
@@ -721,13 +727,8 @@ static void ch375_stop_async(struct ch375_device *dev, uint8_t pipe)
 		libusb_cancel_transfer(tr);
 		/* 等待回调清空 active 标志（事件线程处理） */
 		pthread_mutex_lock(&dev->lock);
-		while (dev->active[pipe]) {
-			struct timespec ts;
-			clock_gettime(CLOCK_REALTIME, &ts);
-			ts.tv_sec += 1;
-			if (pthread_cond_timedwait(&dev->cond, &dev->lock, &ts) != 0)
-				break;
-		}
+		while (dev->active[pipe])
+			pthread_cond_wait(&dev->cond, &dev->lock);
 		pthread_mutex_unlock(&dev->lock);
 	}
 }
@@ -897,6 +898,11 @@ void ch375_close_device(unsigned long index)
 
 	for (pipe = 1; pipe < CH375_MAX_PIPES; pipe++)
 		ch375_stop_async(dev, (uint8_t)pipe);
+
+	pthread_mutex_lock(&dev->lock);
+	while (dev->callbacks_active)
+		pthread_cond_wait(&dev->cond, &dev->lock);
+	pthread_mutex_unlock(&dev->lock);
 
 	pthread_mutex_lock(&dev->lock);
 	while (dev->queue.count > 0) {

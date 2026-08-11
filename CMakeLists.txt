@@ -103,7 +103,7 @@ pkg_check_modules(PKGDEPS REQUIRED ${PKGDEPS})
 
 set(CMAKE_AUTOMOC TRUE)
 
-find_package(Qt5 5.3 COMPONENTS Core Gui LinguistTools Widgets Svg REQUIRED)
+find_package(Qt5 5.3 COMPONENTS Core Gui LinguistTools Widgets Svg Network REQUIRED)
 
 message(STATUS "Qt version: ${Qt5_VERSION}")
 
@@ -116,7 +116,7 @@ if(WIN32)
 	endif()
 endif()
 
-set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::Svg)
+set(QT_LIBRARIES Qt5::Gui Qt5::Widgets Qt5::Svg Qt5::Network)
 
 if(WIN32)
 	# MSYS2/MinGW still ships a separate boost_system library
@@ -231,6 +231,7 @@ memaccess_check_unaligned_le(HAVE_UNALIGNED_LITTLE_ENDIAN_ACCESS)
 #-------------------------------------------------------------------------------
 
 set(PV_TITLE PulseView)
+set(U3LOGIC_VERSION_STRING "0.5")
 set(PV_VERSION_STRING "0.5.0")
 
 set(PV_GLIBMM_VERSION ${PKGDEPS_glibmm-2.4_VERSION})
@@ -274,9 +275,11 @@ configure_file (
 set(pulseview_SOURCES
 	main.cpp
 	pv/application.cpp
+	pv/devicepresence.cpp
 	pv/devicemanager.cpp
 	pv/globalsettings.cpp
 	pv/logging.cpp
+	pv/softwareupdate.cpp
 	pv/mainwindow.cpp
 	pv/metadata_obj.cpp
 	pv/session.cpp
@@ -694,15 +697,12 @@ else()
 	message(FATAL_ERROR "hidapi not found (required by the IAP dialog); install it, e.g. 'brew install hidapi'")
 endif()
 
-if(NOT WIN32)
-	# The CH569 hot-plug polling thread (mainbar.cpp) calls libusb directly
-	pkg_check_modules(LIBUSB libusb-1.0)
-	if(LIBUSB_FOUND)
-		include_directories(${LIBUSB_INCLUDE_DIRS})
-		list(APPEND PULSEVIEW_LINK_LIBS ${LIBUSB_LIBRARIES})
-	else()
-		message(FATAL_ERROR "libusb not found (required by hot-plug polling); install it, e.g. 'brew install libusb'")
-	endif()
+pkg_check_modules(LIBUSB libusb-1.0)
+if(LIBUSB_FOUND)
+	include_directories(${LIBUSB_INCLUDE_DIRS})
+	list(APPEND PULSEVIEW_LINK_LIBS ${LIBUSB_LIBRARIES})
+else()
+	message(FATAL_ERROR "libusb not found (required by analyzer detection)")
 endif()
 
 if(ENABLE_STACKTRACE)

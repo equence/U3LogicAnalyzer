@@ -72,6 +72,8 @@ Channels::Channels(Session &session, QString device_name, QWidget *parent) :
 	Popup(parent),
 	session_(session),
 	device_name_(device_name),
+	acquisition_layout_(nullptr),
+	tabs_(nullptr),
 	updating_channels_(false),
 	device_mode_(DeviceMode::OTHER),
 	is_usb2_(false),
@@ -104,18 +106,99 @@ Channels::Channels(Session &session, QString device_name, QWidget *parent) :
 		radioChannels[i] = nullptr;
 	}
 
-	setLayout(&layout_);
+	QVBoxLayout *root_layout = new QVBoxLayout(this);
+	root_layout->setContentsMargins(14, 14, 14, 14);
+	tabs_ = new QTabWidget(this);
+	tabs_->setObjectName("deviceOptionsTabs");
+
+	QWidget *acquisition_page = new QWidget(tabs_);
+	acquisition_layout_ = new QFormLayout(acquisition_page);
+	acquisition_layout_->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	acquisition_layout_->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+	acquisition_layout_->setFormAlignment(Qt::AlignTop);
+	acquisition_layout_->setContentsMargins(12, 14, 12, 12);
+	acquisition_layout_->setHorizontalSpacing(18);
+	acquisition_layout_->setVerticalSpacing(12);
+
+	QWidget *channels_page = new QWidget(tabs_);
+	channels_page->setLayout(&layout_);
+	layout_.setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	layout_.setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+	layout_.setFormAlignment(Qt::AlignTop);
+	layout_.setContentsMargins(12, 14, 12, 12);
+	layout_.setHorizontalSpacing(18);
+	layout_.setVerticalSpacing(12);
+
+	QScrollArea *acquisition_scroll = new QScrollArea(tabs_);
+	acquisition_scroll->setWidgetResizable(true);
+	acquisition_scroll->setFrameShape(QFrame::NoFrame);
+	acquisition_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	acquisition_scroll->setWidget(acquisition_page);
+
+	QScrollArea *channels_scroll = new QScrollArea(tabs_);
+	channels_scroll->setWidgetResizable(true);
+	channels_scroll->setFrameShape(QFrame::NoFrame);
+	channels_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	channels_scroll->setWidget(channels_page);
+
+	tabs_->addTab(acquisition_scroll, tr("Acquisition"));
+	tabs_->addTab(channels_scroll, tr("Channels"));
+	root_layout->addWidget(tabs_);
+	setLayout(root_layout);
+	setObjectName("deviceOptionsPanel");
+	setStyleSheet(
+		"QWidget#deviceOptionsPanel { background: #202329; color: #dce1e8; }"
+		"QTabWidget#deviceOptionsTabs::pane { border: 1px solid #363b45;"
+		" border-radius: 10px; background: #202329; top: -1px; }"
+		"QTabWidget#deviceOptionsTabs QTabBar { alignment: left; }"
+		"QTabWidget#deviceOptionsTabs QTabBar::tab { min-width: 92px; height: 34px;"
+		" padding: 0 14px; margin-right: 5px; color: #9fa7b2;"
+		" background: transparent; border: none; border-radius: 7px; }"
+		"QTabWidget#deviceOptionsTabs QTabBar::tab:hover { color: #e8ecf2;"
+		" background: #2b2f36; }"
+		"QTabWidget#deviceOptionsTabs QTabBar::tab:selected { color: #f2f5f8;"
+		" background: #343943; border-bottom: 2px solid #56a8ff; }"
+		"QTabWidget#deviceOptionsTabs QScrollArea,"
+		"QTabWidget#deviceOptionsTabs QScrollArea > QWidget > QWidget {"
+		" background: #202329; border: none; }"
+		"QGroupBox { margin-top: 13px; padding: 18px 14px 14px;"
+		" border: 1px solid #3a404a; border-radius: 9px;"
+		" background: #25282e; font-weight: 600; color: #dce1e8; }"
+		"QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left;"
+		" left: 12px; padding: 0 7px; color: #cbd1d9; background: #25282e; }"
+		"QLabel { color: #c7cdd6; }"
+		"QComboBox, QDoubleSpinBox { min-height: 31px; padding: 0 28px 0 10px;"
+		" color: #e7ebf0; background: #1c1f24; border: 1px solid #444b57;"
+		" border-radius: 7px; selection-background-color: #3c79b8; }"
+		"QComboBox:hover, QDoubleSpinBox:hover { border-color: #626d7b; }"
+		"QComboBox:focus, QDoubleSpinBox:focus { border-color: #56a8ff; }"
+		"QRadioButton, QCheckBox { min-height: 28px; spacing: 8px;"
+		" color: #d6dbe2; font-weight: 400; }"
+		"QRadioButton:hover, QCheckBox:hover { color: #ffffff; }"
+	);
 
 	device_mode_ = determineDeviceMode();
 
 	init_ui();
 
-	setMinimumSize(500, 400);
+	setMinimumSize(560, 340);
 }
 
 QSize Channels::sizeHint() const
 {
-	return QSize(500, 400);
+	return QSize(640, 400);
+}
+
+void Channels::show_acquisition_tab()
+{
+	if (tabs_)
+		tabs_->setCurrentIndex(0);
+}
+
+void Channels::show_channels_tab()
+{
+	if (tabs_)
+		tabs_->setCurrentIndex(1);
 }
 
 
@@ -160,8 +243,7 @@ void Channels::init_ui()
 	}
 
 	if (device_mode_ != DeviceMode::OTHER) {
-		QGroupBox* options_box = new QGroupBox("配置", this);
-		options_box->setAlignment(Qt::AlignHCenter);
+		QGroupBox* options_box = new QGroupBox(tr("Configuration"), this);
 		QFormLayout* options_layout = new QFormLayout();
 		QVBoxLayout* vbox_layout = new QVBoxLayout();
 
@@ -170,7 +252,7 @@ void Channels::init_ui()
 
 		options_box->setLayout(options_layout);
 		options_layout->addRow(vbox_layout);
-		layout_.addRow(options_box);
+		acquisition_layout_->addRow(options_box);
 	}
 
 	for (auto& entry : device->channel_groups()) {
@@ -206,10 +288,7 @@ void Channels::init_ui()
 
 	init_channel_state();
 
-	QWidget* bottom_spacer = new QWidget(this);
-	bottom_spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-	bottom_spacer->setFixedHeight(1);
-	layout_.addRow(bottom_spacer);
+	layout_.setRowWrapPolicy(QFormLayout::DontWrapRows);
 }
 
 void Channels::init_wch_ui()
@@ -302,6 +381,8 @@ void Channels::init_channel_radios(QVBoxLayout* layout)
 
 	for (int i = 0; i < channel_modes.size(); ++i) {
 		radioChannels[i] = new QRadioButton(channel_modes[i]);
+		radioChannels[i]->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		radioChannels[i]->setMinimumHeight(radioChannels[i]->fontMetrics().height() + 10);
 		layout->addWidget(radioChannels[i]);
 		connect(radioChannels[i], &QRadioButton::clicked, this, [this, i]() {
 			channelSelect(i);
@@ -462,8 +543,7 @@ void Channels::populate_group(shared_ptr<ChannelGroup> group,
 			grid = new QGridLayout();
 			form_layout->addRow(grid);
 
-			analog_props_box_ = new QGroupBox("通道", this);
-			analog_props_box_->setAlignment(Qt::AlignHCenter);
+			analog_props_box_ = new QGroupBox(tr("Channels"), this);
 			analog_props_box_->setLayout(form_layout);
 			analog_props_box_->setVisible(false);
 			layout_.addRow(analog_props_box_);
@@ -528,8 +608,7 @@ void Channels::populate_group(shared_ptr<ChannelGroup> group,
 		return;
 	}
 
-	QGroupBox* props_box = new QGroupBox("通道", this);
-	props_box->setAlignment(Qt::AlignHCenter);
+	QGroupBox* props_box = new QGroupBox(tr("Channels"), this);
 	props_box->setLayout(form_layout);
 
 	if ((device_mode_ == DeviceMode::CH32H417_USB3_LOGIC ||

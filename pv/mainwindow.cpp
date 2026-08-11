@@ -28,6 +28,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <iterator>
+#include <libusb.h>
 
 #include <QAction>
 #include <QApplication>
@@ -40,16 +41,12 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QMessageBox>
+#include <QMenuBar>
 #include <QSettings>
 #include <QShortcut>
 #include <QWidget>
 #include <QString>
-#include <QTime>
 #include <QTimer>
-#include <QEventLoop>
-#include <QCoreApplication>
-
-#include <thread>
 #include "application.hpp"
 #include "devicemanager.hpp"
 #include "devices/hardwaredevice.hpp"
@@ -86,14 +83,25 @@ MainWindow::MainWindow(QWidget *parent) :
 	session_selector_(this),
 	icon_red_(":/icons/status-red.svg"),
 	icon_green_(":/icons/status-green.svg"),
-	icon_grey_(":/icons/status-grey.svg")
+	icon_grey_(":/icons/status-grey.svg"),
+	device_poll_timer_(this),
+	device_refresh_timer_(this)
 {
-	//Check memory size
 	shared_ptr<sigrok::Context> context = sigrok::Context::create();
-	device_manager_ = new pv::DeviceManager(context, "", true);
+	device_manager_ = new pv::DeviceManager(context, "wch-ch32h417", false);
+	if (libusb_init(&usb_context_) != 0)
+		qWarning() << "Unable to initialize USB device monitoring";
 	sessions_.resize(0);
 	setup_ui();
+	device_poll_timer_.setInterval(1000);
+	connect(&device_poll_timer_, &QTimer::timeout,
+		this, &MainWindow::poll_hardware_devices);
+	device_refresh_timer_.setSingleShot(true);
+	device_refresh_timer_.setInterval(150);
+	connect(&device_refresh_timer_, &QTimer::timeout,
+		this, &MainWindow::refresh_hardware_devices);
 	restore_ui_settings();
+	start_device_monitoring();
 }
 
 bool MainWindow::checkSystemRequirements()
@@ -158,6 +166,8 @@ bool MainWindow::checkSystemRequirements()
 
 MainWindow::~MainWindow()
 {
+	device_poll_timer_.stop();
+	device_refresh_timer_.stop();
 	// Make sure we no longer hold any shared pointers to widgets after the
 	// destructor finishes (goes for sessions and sub windows alike)
 
@@ -165,9 +175,10 @@ MainWindow::~MainWindow()
 		remove_session(sessions_.front());
 	sessions_.resize(0);
 	sub_windows_.clear();
-	if (device_manager_) {
-		free(device_manager_);
-	}
+	delete device_manager_.load();
+	device_manager_.store(nullptr);
+	if (usb_context_)
+		libusb_exit(usb_context_);
 }
 
 void MainWindow::show_session_error(const QString text, const QString info_text)
@@ -302,9 +313,8 @@ shared_ptr<views::ViewBase> MainWindow::add_view(views::ViewType type,
 			main_bar = make_shared<MainBar>(session, this, tv);
 			dock_main->addToolBar(main_bar.get());
 			main_bar->setMovable(false);
+			setup_application_menu(main_bar.get());
 			// connect(main_bar.get(), SIGNAL(divice_detached()), &session, SLOT(on_device_detach()));
-			connect(main_bar.get(), SIGNAL(divice_detached()), this, SLOT(show_device_detach()));
-			connect(main_bar.get(), SIGNAL(device_attached()), this, SLOT(on_device_attached()));
 			connect(this, SIGNAL(save_session()), main_bar.get(), SLOT(on_actionSave_triggered()));
 			connect(main_bar.get(), SIGNAL(new_view(Session*, int)),
 				this, SLOT(on_new_view(Session*, int)));
@@ -330,6 +340,61 @@ shared_ptr<views::ViewBase> MainWindow::add_view(views::ViewType type,
 	}
 	v->setFocus();
 	return v;
+}
+
+void MainWindow::setup_application_menu(MainBar *main_bar)
+{
+	if (application_menu_initialized_ || !main_bar)
+		return;
+	application_menu_initialized_ = true;
+
+	QMenuBar *bar = menuBar();
+	bar->setNativeMenuBar(true);
+
+	QMenu *file_menu = bar->addMenu(tr("File"));
+	file_menu->addAction(main_bar->action_open());
+	file_menu->addAction(main_bar->action_save());
+	file_menu->addAction(main_bar->action_save_as());
+
+	QAction *preferences = new QAction(tr("Preferences..."), this);
+	preferences->setMenuRole(QAction::PreferencesRole);
+	connect(preferences, &QAction::triggered, this, &MainWindow::on_settings_clicked);
+	file_menu->addSeparator();
+	file_menu->addAction(preferences);
+
+	QAction *quit = new QAction(tr("Quit"), this);
+	quit->setMenuRole(QAction::QuitRole);
+	connect(quit, &QAction::triggered, qApp, &QApplication::quit);
+	file_menu->addAction(quit);
+
+	QMenu *device_menu = bar->addMenu(tr("Device"));
+	QAction *refresh = device_menu->addAction(tr("Refresh Devices"));
+	refresh->setShortcut(QKeySequence::Refresh);
+	connect(refresh, &QAction::triggered, this, &MainWindow::refresh_devices_now);
+	device_menu->addSeparator();
+	device_menu->addAction(main_bar->action_device_options());
+	device_menu->addAction(main_bar->action_channel_configuration());
+
+	QMenu *acquisition_menu = bar->addMenu(tr("Acquisition"));
+	acquisition_menu->addAction(main_bar->action_single());
+	acquisition_menu->addAction(main_bar->action_repeat());
+	acquisition_menu->addSeparator();
+	QAction *start_stop = acquisition_menu->addAction(tr("Start / Stop"));
+	start_stop->setShortcut(QKeySequence(Qt::Key_S));
+	connect(start_stop, &QAction::triggered, this, &MainWindow::on_run_stop_clicked);
+
+	QMenu *view_menu = bar->addMenu(tr("View"));
+	QAction *decoder = view_menu->addAction(tr("Add Protocol Decoder"));
+	decoder->setShortcut(QKeySequence(Qt::Key_D));
+	connect(decoder, &QAction::triggered, main_bar, &MainBar::on_add_decoder_clicked);
+	view_menu->addAction(main_bar->action_new_view());
+
+	QMenu *help_menu = bar->addMenu(tr("Help"));
+	help_menu->addAction(main_bar->action_user_guide());
+	help_menu->addAction(main_bar->action_software_update());
+	help_menu->addAction(main_bar->action_update());
+	help_menu->addSeparator();
+	help_menu->addAction(main_bar->action_version_info());
 }
 
 void MainWindow::remove_view(shared_ptr<views::ViewBase> view)
@@ -475,246 +540,193 @@ shared_ptr<Session> MainWindow::add_session()
 
 void MainWindow::do_device_detach_switch()
 {
-	if (!last_focused_session_ || !last_focused_session_->main_bar()) {
-		return;
-	}
-
-	last_focused_session_->device_detached();
-
-	shared_ptr<sigrok::Context> context = sigrok::Context::create();
-	string driver = "wch-ch32h417";
-	auto new_device_manager = new pv::DeviceManager(context, driver, true);
-	if (device_manager_) {
-		free(device_manager_);
-	}
-	device_manager_.store(new_device_manager);
-	last_focused_session_->update_device_manager(new_device_manager);
-
-	list< shared_ptr<devices::HardwareDevice> > devices = new_device_manager->devices();
-
-	if (!devices.empty()) {
-		shared_ptr<devices::Device> default_device = devices.front();
-		WchDeviceType found_device_type = WchDeviceType::None;
-
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			WchDeviceType dev_type = get_wch_device_type_by_driver(
-				dev->hardware_device()->driver()->name());
-			if (dev_type != WchDeviceType::None) {
-				found_device_type = dev_type;
-				default_device = dev;
-				break;
-			}
-		}
-
-		bool is_demo_device = false;
-		shared_ptr<devices::HardwareDevice> hw_dev =
-			std::dynamic_pointer_cast<devices::HardwareDevice>(default_device);
-		if (hw_dev && hw_dev->hardware_device()->driver()->name() == "demo") {
-			is_demo_device = true;
-		}
-
-		last_focused_session_->select_device(default_device);
-		if (default_device) {
-			if (found_device_type != WchDeviceType::None) {
-				QString device_name = (found_device_type == WchDeviceType::CH569)
-					? "USB3.0(CH569)" : "USB3.0(CH32H417)";
-				QString vendor_name = (found_device_type == WchDeviceType::CH569)
-					? "USB3.0(CH569)" : "USB3.0(CH32H417)";
-				last_focused_session_->main_bar()->set_device_selector_name(device_name);
-				last_focused_session_->main_bar()->set_vendorName(vendor_name);
-				restore_sessions();
-			} else if (is_demo_device) {
-				last_focused_session_->main_bar()->set_device_selector_name("Demo device");
-				last_focused_session_->main_bar()->set_vendorName("Demo device");
-				last_focused_session_->create_demo_uart_decoder();
-			}
-		}
-	} else {
-		last_focused_session_->main_bar()->set_vendorName("No Device");
-	}
+	refresh_hardware_devices();
 }
 
 void MainWindow::show_device_detach()
 {
-	if (!last_focused_session_ || !last_focused_session_->main_bar()) {
-		return;
-	}
-
-	attach_process_done = false;
-
-	QDialog* dialog = new QDialog(this);
-	dialog->setWindowTitle(tr("警告"));
-
-	// 设置更大的字体
-	QFont font = dialog->font();
-	font.setPointSize(font.pointSize() + 2);
-	dialog->setFont(font);
-
-	QVBoxLayout *layout = new QVBoxLayout(dialog);
-	layout->setContentsMargins(28, 24, 28, 20);
-	layout->setSpacing(20);
-
-	// 创建图标和文本布局
-	QHBoxLayout *contentLayout = new QHBoxLayout();
-	contentLayout->setSpacing(18);
-
-	// 创建图标标签
-	QLabel *iconLabel = new QLabel(dialog);
-	iconLabel->setPixmap(QMessageBox::standardIcon(QMessageBox::Warning));
-	iconLabel->setAlignment(Qt::AlignTop);
-	contentLayout->addWidget(iconLabel);
-
-	// 创建文本标签
-	QLabel *label = new QLabel(dialog);
-	label->setText(tr("设备已断开！\n是否保存会话？"));
-	label->setStyleSheet(QString("font-size: %1pt;").arg(font.pointSize()));
-	label->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-	contentLayout->addWidget(label, 1);
-
-	layout->addLayout(contentLayout);
-
-	// 创建按钮
-	QHBoxLayout *buttonLayout = new QHBoxLayout();
-	buttonLayout->setSpacing(12);
-	buttonLayout->addStretch();
-	QPushButton *saveBtn = new QPushButton(tr("保存"), dialog);
-	QPushButton *cancelBtn = new QPushButton(tr("不保存"), dialog);
-	saveBtn->setMinimumWidth(90);
-	cancelBtn->setMinimumWidth(90);
-	buttonLayout->addWidget(saveBtn);
-	buttonLayout->addWidget(cancelBtn);
-	layout->addLayout(buttonLayout);
-
-	// 根据内容自动计算大小，禁止窗口缩放
-	dialog->setFixedSize(dialog->sizeHint());
-
-	// 非模态显示
-	dialog->setModal(false);
-
-	connect(saveBtn, &QPushButton::clicked, [=](){
-		if (last_focused_session_->main_bar()->channels_ &&
-			is_wch_device(last_focused_session_->main_bar()->channels_->device_name_)) {
-			save_sessions();
-			last_focused_session_->main_bar()->set_setting_default();
-		}
-		do_device_detach_switch();
-		attach_process_done = true;
-		dialog->deleteLater();
-	});
-
-	connect(cancelBtn, &QPushButton::clicked, [=](){
-		do_device_detach_switch();
-		attach_process_done = true;
-		dialog->deleteLater();
-	});
-
-	dialog->show();
-}
-
-void sleep_ex(unsigned int msec)
-{
-    QTime dieTime = QTime::currentTime().addMSecs(msec);
-    while(QTime::currentTime() < dieTime ){
-        QCoreApplication::processEvents(QEventLoop::AllEvents,100);
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+	QMessageBox *notice = new QMessageBox(QMessageBox::Information,
+		tr("Device disconnected"),
+		tr("The analyzer was disconnected. Captured data has been kept."),
+		QMessageBox::Ok, this);
+	notice->setModal(false);
+	notice->setAttribute(Qt::WA_DeleteOnClose);
+	notice->show();
 }
 
 void MainWindow::on_device_attached()
 {
-	if (!attach_process_done)
+	refresh_hardware_devices();
+}
+
+bool MainWindow::read_usb_snapshot(std::set<UsbDeviceIdentity> &snapshot) const
+{
+	if (!usb_context_)
+		return false;
+	libusb_device **devices = nullptr;
+	const ssize_t count = libusb_get_device_list(usb_context_, &devices);
+	if (count < 0)
+		return false;
+
+	snapshot.clear();
+	for (ssize_t i = 0; i < count; ++i) {
+		libusb_device_descriptor descriptor;
+		if (libusb_get_device_descriptor(devices[i], &descriptor) != 0)
+			continue;
+		if (!is_supported_analyzer(descriptor.idVendor, descriptor.idProduct))
+			continue;
+		snapshot.insert({descriptor.idVendor, descriptor.idProduct,
+			libusb_get_bus_number(devices[i]),
+			libusb_get_device_address(devices[i])});
+	}
+	libusb_free_device_list(devices, 1);
+	return true;
+}
+
+bool MainWindow::analyzer_present(const QString &vendor) const
+{
+	const uint16_t expected_pid = vendor == "USB3.0(CH569)"
+		? 0x8025 : 0x5537;
+	std::set<UsbDeviceIdentity> snapshot;
+	if (!read_usb_snapshot(snapshot))
+		return false;
+	return std::any_of(snapshot.begin(), snapshot.end(),
+		[expected_pid](const UsbDeviceIdentity &device) {
+			return device.vendor_id == 0x1a86 &&
+				device.product_id == expected_pid;
+		});
+}
+
+void MainWindow::start_device_monitoring()
+{
+	std::set<UsbDeviceIdentity> snapshot;
+	if (read_usb_snapshot(snapshot)) {
+		observed_usb_devices_ = snapshot;
+		usb_snapshot_initialized_ = true;
+	}
+	device_poll_timer_.start();
+}
+
+void MainWindow::poll_hardware_devices()
+{
+	std::set<UsbDeviceIdentity> snapshot;
+	if (!read_usb_snapshot(snapshot)) {
+		if (!usb_error_reported_) {
+			qWarning() << "Unable to enumerate USB analyzers; keeping current state";
+			usb_error_reported_ = true;
+		}
 		return;
-	attach_process_done = false;
-
-	if (last_focused_session_ && last_focused_session_->device()) {
-		last_focused_session_->stop_capture();
-		last_focused_session_->device()->close();
 	}
 
-	// Initialise libsigrok
-	shared_ptr<sigrok::Context> context;
-	context = sigrok::Context::create();
-	string driver = "wch-ch32h417";
+	usb_error_reported_ = false;
+	if (!usb_snapshot_initialized_) {
+		observed_usb_devices_ = snapshot;
+		usb_snapshot_initialized_ = true;
+		return;
+	}
+	pending_presence_change_ = presence_change(observed_usb_devices_, snapshot);
+	if (pending_presence_change_ == PresenceChange::Unchanged)
+		return;
 
-	auto device_manager = new pv::DeviceManager(context, driver, true);
-	if (device_manager_)
-		free(device_manager_);
-	device_manager_.store(device_manager);
-	last_focused_session_->update_device_manager(device_manager_);
+	device_scan_retries_ = 0;
+	observed_usb_devices_ = snapshot;
+	device_refresh_timer_.start();
+}
 
-	list< shared_ptr<devices::HardwareDevice> > devices =
-		device_manager->devices();
+void MainWindow::refresh_devices_now()
+{
+	std::set<UsbDeviceIdentity> snapshot;
+	if (read_usb_snapshot(snapshot)) {
+		pending_presence_change_ = usb_snapshot_initialized_
+			? presence_change(observed_usb_devices_, snapshot)
+			: PresenceChange::Added;
+		observed_usb_devices_ = snapshot;
+		usb_snapshot_initialized_ = true;
+	}
+	refresh_hardware_devices();
+}
 
-	QString currentVendorName = last_focused_session_->main_bar()->get_vendorName();
-	bool is_using_ch569 = (currentVendorName == "USB3.0(CH569)");
-	bool is_using_ch32h417 = (currentVendorName == "USB3.0(CH32H417)");
+void MainWindow::set_not_connected()
+{
+	for (const shared_ptr<Session> &session : sessions_) {
+		if (!session->main_bar())
+			continue;
+		session->main_bar()->set_vendorName(tr("Not connected"));
+		session->main_bar()->reset_device_selector();
+		session->main_bar()->update_device_list();
+	}
+}
 
-	bool current_device_still_exists = false;
-	if (is_using_ch569) {
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			WchDeviceType dev_type = get_wch_device_type_by_driver(
-				dev->hardware_device()->driver()->name());
-			if (dev_type == WchDeviceType::CH569) {
-				current_device_still_exists = true;
-				break;
-			}
-		}
-	} else if (is_using_ch32h417) {
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			WchDeviceType dev_type = get_wch_device_type_by_driver(
-				dev->hardware_device()->driver()->name());
-			if (dev_type == WchDeviceType::CH32H417) {
-				current_device_still_exists = true;
-				break;
-			}
-		}
+void MainWindow::refresh_hardware_devices()
+{
+	const bool had_device = last_focused_session_ &&
+		dynamic_pointer_cast<devices::HardwareDevice>(
+			last_focused_session_->device());
+
+	// A refresh while the active analyzer is still present must not clear
+	// captured data by tearing down and reselecting the same device.
+	if (had_device && (pending_presence_change_ == PresenceChange::Unchanged ||
+			pending_presence_change_ == PresenceChange::Added)) {
+		pending_presence_change_ = PresenceChange::Unchanged;
+		return;
 	}
 
-	if (current_device_still_exists) {
-		shared_ptr<devices::Device> current_type_device = nullptr;
-		WchDeviceType target_type = is_using_ch569 ? WchDeviceType::CH569 : WchDeviceType::CH32H417;
+	for (const shared_ptr<Session> &session : sessions_) {
+		if (dynamic_pointer_cast<devices::HardwareDevice>(session->device()))
+			session->disconnect_device();
+		if (session->main_bar())
+			session->main_bar()->reset_device_selector();
+	}
 
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			WchDeviceType dev_type = get_wch_device_type_by_driver(
-				dev->hardware_device()->driver()->name());
-			if (dev_type == target_type) {
-				current_type_device = dev;
-				break;
-			}
-		}
+	// libsigrok drivers keep process-global state, so retain one Context for
+	// the application lifetime and rescan its WCH driver in place.
+	DeviceManager *new_manager = device_manager_.load();
+	auto drivers = new_manager->context()->drivers();
+	auto driver = drivers.find("wch-ch32h417");
+	if (driver != drivers.end())
+		new_manager->driver_scan(driver->second,
+			std::map<const sigrok::ConfigKey *, Glib::VariantBase>());
 
-		if (current_type_device) {
-			last_focused_session_->select_device(current_type_device);
-		}
-		last_focused_session_->main_bar()->update_device_list();
-		restore_sessions();
-	} else if (!devices.empty()) {
-		shared_ptr<devices::Device> default_device = nullptr;
-		WchDeviceType found_device_type = WchDeviceType::None;
-
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			WchDeviceType dev_type = get_wch_device_type_by_driver(
-				dev->hardware_device()->driver()->name());
-			if (dev_type != WchDeviceType::None) {
-				found_device_type = dev_type;
-				default_device = dev;
-				break;
-			}
-		}
-
-		if (default_device) {
-			last_focused_session_->select_device(default_device);
-			QString device_name = (found_device_type == WchDeviceType::CH569)
-				? "USB3.0(CH569)" : "USB3.0(CH32H417)";
-			QString vendor_name = (found_device_type == WchDeviceType::CH569)
-				? "USB3.0(CH569)" : "USB3.0(CH32H417)";
-			last_focused_session_->main_bar()->set_device_selector_name(device_name);
-			last_focused_session_->main_bar()->set_vendorName(vendor_name);
-			restore_sessions();
+	shared_ptr<devices::HardwareDevice> selected;
+	for (const shared_ptr<devices::HardwareDevice> &device :
+			new_manager->devices()) {
+		if (get_wch_device_type(QString::fromStdString(
+				device->device()->vendor())) != WchDeviceType::None) {
+			selected = device;
+			break;
 		}
 	}
 
-	attach_process_done = true;
+	if (had_device && !selected)
+		reconnect_requires_selection_ = true;
+	if (had_device && pending_presence_change_ != PresenceChange::Added)
+		reconnect_requires_selection_ = true;
+
+	if (last_focused_session_ && selected && !reconnect_requires_selection_) {
+		last_focused_session_->select_device(selected);
+		if (last_focused_session_->device()) {
+			pending_presence_change_ = PresenceChange::Unchanged;
+			device_refresh_timer_.setInterval(150);
+			device_scan_retries_ = 0;
+			last_focused_session_->main_bar()->show_hardware_version();
+			return;
+		}
+	}
+
+	set_not_connected();
+	if (!selected && !observed_usb_devices_.empty() &&
+			device_scan_retries_ < 3) {
+		++device_scan_retries_;
+		pending_presence_change_ = PresenceChange::Added;
+		device_refresh_timer_.setInterval(750);
+		device_refresh_timer_.start();
+		return;
+	}
+	device_refresh_timer_.setInterval(150);
+	device_scan_retries_ = 0;
+	if (had_device)
+		show_device_detach();
+	pending_presence_change_ = PresenceChange::Unchanged;
 }
 
 void MainWindow::remove_session(shared_ptr<Session> session)
@@ -783,7 +795,6 @@ void MainWindow::add_default_setting()
 			is_repeat_acq_ = false;
 		}
 	}
-	last_focused_session_->main_bar()->hot_plug_start();
 }
 
 void MainWindow::add_session_with_file(string open_file_name,
@@ -795,115 +806,32 @@ void MainWindow::add_session_with_file(string open_file_name,
 
 void MainWindow::add_default_session()
 {
-	// Only add the default session if there would be no session otherwise
-	// if (sessions_.size() > 0)
-	// 	return;
-	WchDeviceType found_device_type = WchDeviceType::None;
-	list< shared_ptr<devices::HardwareDevice> > devices =
-		device_manager_.load()->devices();
-	for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-		WchDeviceType dev_type = get_wch_device_type_by_driver(
-			dev->hardware_device()->driver()->name());
-		if (dev_type != WchDeviceType::None) {
-			found_device_type = dev_type;
-            break;
-        }
-	}
-	qDebug() << "add_default_session devices size: " << devices.size();
-	if (found_device_type == WchDeviceType::None){
-		sleep_ex(100);
-		shared_ptr<sigrok::Context> context;
-		context = sigrok::Context::create();
-		string driver = "wch-ch32h417";
-		if (device_manager_)
-			free(device_manager_);
-		device_manager_ = new pv::DeviceManager(context, driver, true);
-	}
-	
-	shared_ptr<Session> session = nullptr;
-	if( sessions_.size() == 0){
-		session = add_session();
-	}else{
-		session = sessions_.front();
-	}
-	session->update_device_manager(device_manager_);
-	shared_ptr<devices::HardwareDevice> wch_device = nullptr;
-	shared_ptr<devices::HardwareDevice> demo_device = nullptr;
-	shared_ptr<devices::HardwareDevice> default_device = nullptr;
-	devices = device_manager_.load()->devices();
-	// Check the list of available devices. Prefer the one that was
-	// found with user supplied scan specs (if applicable). Then try
-	// one of the auto detected devices that are not the demo device.
-	// Pick demo in the absence of "genuine" hardware devices.
-	// shared_ptr<devices::HardwareDevice> user_device, other_device, demo_device;
-	if (!devices.empty()) {
-		default_device = devices.front();
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			WchDeviceType dev_type = get_wch_device_type_by_driver(
-				dev->hardware_device()->driver()->name());
-			if (dev_type != WchDeviceType::None) {
-				found_device_type = dev_type;
-				wch_device = dev;
-				default_device = dev;
-				break;
-			}
-		}
-		// Find demo device as fallback
-		for (const shared_ptr<devices::HardwareDevice>& dev : devices) {
-			if (string(dev->hardware_device()->driver()->name()) == "demo") {
-				demo_device = dev;
-				break;
-			}
-		}
-		// If no WCH device found and demo exists, use demo
-		if (!wch_device && demo_device)
-			default_device = demo_device;
-	}
-	session->select_device(default_device);
+	shared_ptr<Session> session = sessions_.empty() ? add_session() :
+		sessions_.front();
+	session->update_device_manager(device_manager_.load());
 
-	// If WCH device failed to open, fall back to demo device
-	if (wch_device && !session->device() && demo_device) {
-		qDebug() << "WCH device open failed, falling back to demo device";
-		found_device_type = WchDeviceType::None;
-		session->select_device(demo_device);
-
-		if (session->device() && session->main_bar()) {
-			session->main_bar()->set_vendorName("Demo device");
-			session->main_bar()->set_device_selector_name("Demo device");
+	shared_ptr<devices::HardwareDevice> selected;
+	for (const shared_ptr<devices::HardwareDevice> &device :
+			device_manager_.load()->devices()) {
+		if (get_wch_device_type(QString::fromStdString(
+				device->device()->vendor())) != WchDeviceType::None) {
+			selected = device;
+			break;
 		}
 	}
 
-	// Check if using demo device
-	bool is_demo_device = false;
-	if (session->device()) {
-		shared_ptr<devices::HardwareDevice> hw_dev =
-			std::dynamic_pointer_cast<devices::HardwareDevice>(session->device());
-		if (hw_dev && string(hw_dev->hardware_device()->driver()->name()) == "demo") {
-			is_demo_device = true;
-		}
-	}
-
-	if (is_demo_device) {
-		// Demo device: create default UART decoder, don't restore saved decoders
-		if (session->main_bar()) {
-			session->main_bar()->set_vendorName("Demo device");
-			session->main_bar()->set_device_selector_name("Demo device");
-		}
-		session->create_demo_uart_decoder();
-
-		QTimer::singleShot(10, [this, session]() {
-			if (session && session->get_capture_state() == Session::Stopped) {
-				session->start_capture([](QString message) {
-					qDebug() << "Demo device auto-start capture: " << message;
-				});
-			}
-		});
-	} else if (found_device_type != WchDeviceType::None) {
-		// WCH device: show hardware version
-		if (session->main_bar())
+	if (selected) {
+		session->select_device(selected);
+		if (session->device() && session->main_bar())
 			session->main_bar()->show_hardware_version();
-		else
-			qDebug() << "session->main_bar() == nullptr";
+	} else {
+		set_not_connected();
+		if (!observed_usb_devices_.empty()) {
+			device_scan_retries_ = 0;
+			pending_presence_change_ = PresenceChange::Added;
+			device_refresh_timer_.setInterval(750);
+			device_refresh_timer_.start();
+		}
 	}
 }
 void MainWindow::save_sessions()
@@ -912,7 +840,7 @@ void MainWindow::save_sessions()
 	int ch569_id = 0, ch32h417_id = 0;
 
 	for (shared_ptr<Session>& session : sessions_) {
-		// Ignore sessions using the demo device or no device at all
+		// Ignore sessions with no supported hardware device.
 		if (session->device()) {
 			shared_ptr<devices::HardwareDevice> device =
 				dynamic_pointer_cast< devices::HardwareDevice >
@@ -1382,6 +1310,8 @@ void MainWindow::on_session_device_changed()
 {
 	Session *session = qobject_cast<Session*>(QObject::sender());
 	assert(session);
+	if (session->device())
+		reconnect_requires_selection_ = false;
 
 	// Ignore if caller is not the currently focused session
 	// unless there is only one session

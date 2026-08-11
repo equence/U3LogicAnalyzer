@@ -66,6 +66,7 @@ public:
 	 * Returns a reference to the selected device.
 	 */
 	shared_ptr<devices::Device> selected_device();
+	QString selected_vendor() const;
 
 	/**
 	 * Sets the current list of devices.
@@ -81,7 +82,8 @@ public:
 	 * device fails to open.
 	 */
 	void reset();
-	void set_device_list_name(QString &device_list_name);
+	void set_not_connected();
+	void set_device_list_name(const QString &device_list_name);
 
 	void update_device_mamager(DeviceManager * dev_manager);
 
@@ -95,7 +97,6 @@ private Q_SLOTS:
 	void on_action(QObject *action);
 	void on_menu_hovered(QAction *action);
 	void on_menu_hover_timeout();
-	void on_button_clicked();  // 处理按钮点击，显示下拉菜单
 
 Q_SIGNALS:
 	void device_selected();
@@ -108,6 +109,7 @@ private:
 	QSignalMapper mapper_;
 
 	shared_ptr<devices::Device> selected_device_;
+	QString selected_vendor_;
 	vector< weak_ptr<devices::Device> > devices_;
 
 	QString device_tooltip_;

@@ -42,12 +42,17 @@ SweepTimingWidget::SweepTimingWidget(const char *suffix,
 	QWidget(parent),
 	suffix_(suffix),
 	layout_(this),
+	prefix_(this),
 	value_(this),
 	list_(this),
 	value_type_(None)
 {
 	pData = new uint64_t[50];
 	setContentsMargins(0, 0, 0, 0);
+	setObjectName("captureParameter");
+	setAttribute(Qt::WA_StyledBackground, true);
+	setFixedHeight(32);
+	prefix_.setObjectName("parameterLabel");
 
 	value_.setDecimals(0);
 	value_.setSuffix(QString::fromUtf8(suffix));
@@ -62,6 +67,8 @@ SweepTimingWidget::SweepTimingWidget(const char *suffix,
 
 	setLayout(&layout_);
 	layout_.setMargin(0);
+	layout_.setSpacing(0);
+	layout_.addWidget(&prefix_);
 	layout_.addWidget(&list_);
 	layout_.addWidget(&value_);
 
@@ -70,6 +77,11 @@ SweepTimingWidget::SweepTimingWidget(const char *suffix,
 
 	list_.setStyleSheet("QComboBox{combobox-popup:0;}");
 	list_.setMaxVisibleItems(10);
+}
+
+void SweepTimingWidget::set_prefix_text(const QString &text)
+{
+	prefix_.setText(text);
 }
 
 SweepTimingWidget::~SweepTimingWidget()
@@ -117,6 +129,7 @@ void SweepTimingWidget::show_list_time(const uint64_t *vals, size_t count)
 	list_.setSizeAdjustPolicy(QComboBox::AdjustToContents);
 	list_.setMinimumWidth(110);
 
+	prefix_.show();
 	value_.hide();
 	list_.show();
 }
@@ -180,6 +193,7 @@ void SweepTimingWidget::allow_user_entered_values(bool value)
 void SweepTimingWidget::show_none()
 {
 	value_type_ = None;
+	prefix_.hide();
 	value_.hide();
 	list_.hide();
 }
@@ -195,6 +209,7 @@ void SweepTimingWidget::show_min_max_step(uint64_t min, uint64_t max,
 	value_.setRange(min, max);
 	value_.setSingleStep(step);
 
+	prefix_.show();
 	value_.show();
 	list_.hide();
 }
@@ -214,6 +229,7 @@ void SweepTimingWidget::show_list(const uint64_t *vals, size_t count)
 	list_.setSizeAdjustPolicy(QComboBox::AdjustToContents);
 	list_.setMinimumWidth(125);
 
+	prefix_.show();
 	value_.hide();
 	list_.show();
 }

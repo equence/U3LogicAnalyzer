@@ -133,6 +133,7 @@ protected:
 
 protected Q_SLOTS:
 	void on_setting_changed(const QString &key, const QVariant &value);
+	void on_color_changed(const QColor &color) override;
 
 	void on_trigger();
 
@@ -140,6 +141,8 @@ protected Q_SLOTS:
 	void on_set_none_trigger();
 
 protected:
+	void update_trace_colors(const QColor &color);
+
 	QColor high_fill_color_;
 	bool show_sampling_points_, fill_high_areas_;
 	float high_level_offset_, low_level_offset_;  // y offsets relative to trace

@@ -7,6 +7,8 @@ analyzer, based on PulseView 0.5.0 with a trimmed sigrok stack
 (libsigrok + libsigrokdecode). It supports 130 protocol decoders
 (I2C / SPI / UART ...).
 
+![U3LogicAnalyzer running on macOS with a CH32H417 analyzer](docs/images/u3logic-analyzer-macos.png)
+
 ## Features
 
 - CH32H417 (USB 3.0, up to 200 MHz sampling) and CH569 hot-plug detection
@@ -15,6 +17,7 @@ analyzer, based on PulseView 0.5.0 with a trimmed sigrok stack
     required (protocol based on WCH's official CH37X_LINUX SDK)
 - IAP firmware-upgrade dialog (HID mode on all platforms;
   CH375 mode is Windows-only)
+- Software updates through GitHub Releases
 - Protocol-decoder channel-assignment dialog
 - Chinese UI, dark theme, new toolbar icons
 - 130 protocol decoders
@@ -105,12 +108,7 @@ Linux / Windows on push to master and pull requests. Pushing a `v*` tag
 ## Known limitations
 
 - CH375 driver mode is Windows-only; macOS/Linux use the libusb transport.
-  Capture with real hardware should be verified on the target platform.
 - IAP CH375 mode is Windows-only; HID mode works on all platforms.
-- CH32H417 hot-plug notification is a no-op on non-Windows platforms; the
-  startup scan and the CH569 libusb polling thread cover device detection.
-- The 16-channel mux zoom-buffer divide-by-zero crash has been fixed; verify
-  with real hardware.
 
 ## Changes vs upstream PulseView
 

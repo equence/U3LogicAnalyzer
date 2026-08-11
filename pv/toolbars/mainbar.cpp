@@ -21,11 +21,13 @@
 #define ENABLE_DECODE
 #include <extdef.h>
 #include <QApplication>
+#include "config.h"
 #include "pv/application.hpp"
 #include <algorithm>
 #include <cassert>
 
 #include <QProgressDialog>
+#include <QPointer>
 #include <QDir>
 #include <QFileInfo>
 
@@ -36,15 +38,19 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPixmap>
 #include <QSettings>
 #include <QToolTip>
 #include <QString>
 #include "mainbar.hpp"
-#include <thread>
 #include <boost/algorithm/string/join.hpp>
 #include <QTime>
 #include <QStandardPaths>
+#include <QTimer>
+#include <QUrl>
 #include <QDesktopServices>
 #include <QEventLoop>
 #include <QCoreApplication>
@@ -60,6 +66,7 @@
 #include <pv/mainwindow.hpp>
 #include <pv/popups/channels.hpp>
 #include <pv/popups/deviceoptions.hpp>
+#include <pv/softwareupdate.hpp>
 #include <pv/util.hpp>
 #include <pv/views/trace/view.hpp>
 #include <pv/widgets/exportmenu.hpp>
@@ -99,6 +106,7 @@ using boost::algorithm::join;
 #define WCH_PID_CH569 0x8025
 #define WCH_PID_CH32H417 0x5537
 #define WCH_PID_CH32H417_HID 0xFE17
+
 namespace pv
 {
 	namespace toolbars
@@ -121,7 +129,15 @@ namespace pv
 																							action_save_selection_as_(new QAction(this)),
 																							action_restore_setup_(new QAction(this)),
 																							action_save_setup_(new QAction(this)),
-																							action_connect_(new QAction(this)),
+																					action_connect_(new QAction(this)),
+																					action_single_(new QAction(this)),
+																					action_repeat_(new QAction(this)),
+																					action_device_options_(new QAction(this)),
+																					action_channel_configuration_(new QAction(this)),
+																	action_version_info_(new QAction(this)),
+																	action_update_(new QAction(this)),
+																	action_software_update_(new QAction(this)),
+																	action_user_guide_(new QAction(this)),
 																							run_stop_button_(new QToolButton()),
 																							channels_button_ex_(new QToolButton()),
 																							model_change_button_(new QToolButton()),
@@ -148,79 +164,74 @@ namespace pv
 #endif
 		// add_math_signal_button_(new QToolButton())
 		{
-			setIconSize(QSize(32, 32));
+			setIconSize(QSize(22, 22));
+			setFixedHeight(46);
 			channel_number_ = 16;
 			channels_ = nullptr;
 
 			// 初始化设备状态图标
 			device_status_icon_->setObjectName(QString::fromUtf8("device_status_icon"));
-			device_status_icon_->setIcon(QIcon(":/icons/Demo.png"));
-			device_status_icon_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			device_status_icon_->setText(tr("Demo"));
-			device_status_icon_->setToolTip(tr("Device Status: Demo"));
+			device_status_icon_->setIcon(QIcon(":/icons/status-grey.svg"));
+			device_status_icon_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+			device_status_icon_->setText(tr("Not connected"));
+			device_status_icon_->setToolTip(tr("Device Status: Not connected"));
 			device_status_icon_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 			setObjectName(QString::fromUtf8("MainBar"));
+			sample_count_.set_prefix_text(tr("Duration"));
+			sample_rate_.set_prefix_text(tr("Sample rate"));
 
 			setContextMenuPolicy(Qt::PreventContextMenu);
 
 			setStyleSheet(
-				"QToolBar {"
-				"    spacing: 2px;"
-				"    padding: 4px;"
-				"    background: transparent;"
-				"}"
-				"QToolBar QToolButton {"
-				"    margin: 0px;"
-				"    padding: 2px;"
-				"    border: 1px solid transparent;"
-				"    border-radius: 2px;"
-				"}"
-				"QToolBar QToolButton:hover {"
-				"    background: rgba(180, 180, 180, 60);"
-				"    border: 1px solid rgba(120, 120, 120, 100);"
-				"}"
-				"QToolBar QToolButton:pressed {"
-				"    background: rgba(150, 150, 150, 80);"
-				"}"
-				"QToolBar QToolButton#device_status_icon {"
-				"    color: white;"
-				"}"
-				"QToolBar QToolButton#device_status_icon:disabled {"
-				"    color: white;"
-				"}"
-				"QToolBar QToolButton[popupMode='1'] {"  // MenuButtonPopup
-				"    padding-right: 8px;"
-				"}"
-				"QToolBar QToolButton[popupMode='2'] {"  // InstantPopup
-				"    padding-right: 6px;"
-				"}"
-				"QToolBar QToolButton::menu-button {"
-				"    width: 12px;"
-				"    border: none;"
-				"    background: transparent;"
-				"}"
-				"QToolBar QToolButton::menu-button:hover {"
-				"    background: rgba(180, 180, 180, 60);"
-				"    border: none;"
-				"}"
-				"QToolBar QToolButton::menu-arrow {"
-				"    width: 8px;"
-				"}"
-				"QToolBar QToolButton::menu-arrow:hover {"
-				"    background: rgba(180, 180, 180, 60);"
-				"}"
+				"QToolBar { spacing: 4px; padding: 6px 10px;"
+				" background: #25282e; border: none;"
+				" border-bottom: 1px solid #343840; }"
+				"QToolBar QToolButton { margin: 0; padding: 4px;"
+				" border: 1px solid transparent; border-radius: 7px;"
+				" color: #d8dee9; }"
+				"QToolBar QToolButton:hover { background: #343943;"
+				" border-color: #454b56; }"
+				"QToolBar QToolButton:pressed { background: #1f2227; }"
+				"QToolBar QToolButton:disabled { color: #686e78; }"
+				"QToolBar QToolButton#deviceSelector {"
+				" padding: 4px 24px 4px 10px; background: #30343b;"
+				" border: 1px solid #414650; border-radius: 8px;"
+				" font-weight: 500; }"
+				"QToolBar QToolButton#deviceSelector:hover {"
+				" background: #383d46; border-color: #59616e; }"
+				"QToolBar QToolButton#deviceSelector::menu-button {"
+				" width: 22px; border: none; background: transparent; }"
+				"QToolBar QComboBox { min-height: 30px;"
+				" padding: 0 24px 0 10px; background: #202329;"
+				" border: 1px solid #414650; border-radius: 7px;"
+				" color: #e2e6ec; }"
+				"QToolBar QComboBox:hover { border-color: #626b78; }"
+				"QToolBar QWidget#captureParameter { background: #202329;"
+				" border: 1px solid #414650; border-radius: 7px; }"
+				"QToolBar QWidget#captureParameter QLabel#parameterLabel {"
+				" padding: 0 8px 0 10px; color: #8f98a5; font-size: 12px; }"
+				"QToolBar QWidget#captureParameter QComboBox { min-width: 78px;"
+				" max-width: 104px; min-height: 28px; padding-left: 9px;"
+				" background: transparent; border: none; border-left: 1px solid #3a404a;"
+				" border-radius: 0; }"
+				"QToolBar QWidget#captureParameter:hover { border-color: #626b78; }"
+				"QToolBar::separator { width: 1px; height: 24px;"
+				" margin: 4px 5px; background: #3a3f48; }"
+				"QToolBar QToolButton[popupMode='1'] { padding-right: 8px; }"
+				"QToolBar QToolButton[popupMode='2'] { padding-right: 6px; }"
+				"QToolBar QToolButton::menu-button { width: 12px;"
+				" border: none; background: transparent; }"
+				"QToolBar QToolButton::menu-arrow { width: 8px; }"
 			);
 
 			// Actions
 			action_new_view_->setText(tr("Decoding Result"));
-			action_new_view_->setIcon(QIcon::fromTheme("window-new",
-													   QIcon(":/icons/decode_result.png")));
+			action_new_view_->setIcon(QIcon(":/icons/decode-result.svg"));
 			connect(action_new_view_, SIGNAL(triggered(bool)),
 					this, SLOT(on_actionNewView_triggered()));
 
 			action_open_->setText(tr("&Open..."));
-			action_open_->setIcon(QIcon::fromTheme("document-open",
-												   QIcon(":/icons/document-open.png")));
+			action_open_->setIcon(QIcon(":/icons/folder-open.svg"));
 			action_open_->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_O));
 			connect(action_open_, SIGNAL(triggered(bool)),
 					this, SLOT(on_actionOpen_triggered()));
@@ -230,8 +241,7 @@ namespace pv
 					this, SLOT(on_actionRestoreSetup_triggered()));
 
 			action_save_->setText(tr("Save"));
-			action_save_->setIcon(QIcon::fromTheme("document-save-as",
-												   QIcon(":/icons/document-save-as.png")));
+			action_save_->setIcon(QIcon(":/icons/save.svg"));
 			action_save_->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_S));
 			connect(action_save_, SIGNAL(triggered(bool)),
 					this, SLOT(on_actionSave_triggered()));
@@ -287,29 +297,37 @@ namespace pv
 			new_view_button_->setMenu(menu_new_view);
 			new_view_button_->setDefaultAction(action_new_view_);
 			new_view_button_->setPopupMode(QToolButton::MenuButtonPopup);
-			new_view_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+			new_view_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			new_view_button_->setToolTip(tr("Decoding Result"));
 
 			// model_ button
 			QMenu *menu_model_view = new QMenu();
-			QAction *actionSingle = menu_model_view->addAction(tr("single"));
-			QAction *actionRepeat = menu_model_view->addAction(tr("repeat"));
-			actionSingle->setIcon(QIcon(":/icons/Single.png"));
-			actionRepeat->setIcon(QIcon(":/icons/Repeat.png"));
+			action_single_->setText(tr("Single"));
+			action_repeat_->setText(tr("Repeat"));
+			action_single_->setIcon(QIcon(":/icons/capture-single.svg"));
+			action_repeat_->setIcon(QIcon(":/icons/repeat.svg"));
+			menu_model_view->addAction(action_single_);
+			menu_model_view->addAction(action_repeat_);
 
-			connect(actionSingle, SIGNAL(triggered(bool)), this, SLOT(on_actionSingle_triggered()));
-			connect(actionRepeat, SIGNAL(triggered(bool)), this, SLOT(on_actionRepeat_triggered()));
+			connect(action_single_, SIGNAL(triggered(bool)), this, SLOT(on_actionSingle_triggered()));
+			connect(action_repeat_, SIGNAL(triggered(bool)), this, SLOT(on_actionRepeat_triggered()));
 
 			// help button menu
 			QMenu *menu_help_view = new QMenu();
-			QAction *action_version_info = menu_help_view->addAction(tr("version info"));
-			// QAction *action_feedback = menu_help_view->addAction(tr("feedback"));
-			QAction *action_update = menu_help_view->addAction(tr("Update"));
-			QAction *action_use_guide = menu_help_view->addAction(tr("User Guide"));
+			action_version_info_->setText(tr("Version Info"));
+			action_software_update_->setText(tr("Software Update"));
+			action_update_->setText(tr("Firmware Update"));
+			action_user_guide_->setText(tr("User Guide"));
+			menu_help_view->addAction(action_version_info_);
+			menu_help_view->addAction(action_software_update_);
+			menu_help_view->addAction(action_update_);
+			menu_help_view->addAction(action_user_guide_);
 			// QAction *action_about = menu_help_view->addAction(tr("About"));
-			connect(action_version_info, SIGNAL(triggered(bool)), this, SLOT(on_action_version_info_triggered()));
+			connect(action_version_info_, SIGNAL(triggered(bool)), this, SLOT(on_action_version_info_triggered()));
+			connect(action_software_update_, SIGNAL(triggered(bool)), this, SLOT(on_action_software_update_triggered()));
 			// connect(action_feedback, SIGNAL(triggered(bool)), this, SLOT(on_action_feedback_triggered()));
-			connect(action_update, SIGNAL(triggered(bool)), this, SLOT(on_action_update_triggered()));
-			connect(action_use_guide, SIGNAL(triggered(bool)), this, SLOT(on_action_use_guide_triggered()));
+			connect(action_update_, SIGNAL(triggered(bool)), this, SLOT(on_action_update_triggered()));
+			connect(action_user_guide_, SIGNAL(triggered(bool)), this, SLOT(on_action_use_guide_triggered()));
 			// connect(action_about, SIGNAL(triggered(bool)), this, SLOT(on_action_about_triggered()));
 			// Open button
 			vector<QAction *> open_actions;
@@ -321,10 +339,10 @@ namespace pv
 
 			// help button
 			help_button_->setMenu(menu_help_view);
-			help_button_->setIcon(QIcon(":/icons/Help.png"));
+			help_button_->setIcon(QIcon(":/icons/help-circle.svg"));
 			help_button_->setPopupMode(QToolButton::MenuButtonPopup);
-			help_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			help_button_->setText(tr("Help"));
+			help_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			help_button_->setToolTip(tr("Help"));
 			connect(help_button_, &QToolButton::clicked, help_button_, &QToolButton::showMenu);
 
 			widgets::ImportMenu *import_menu = new widgets::ImportMenu(this,
@@ -333,25 +351,25 @@ namespace pv
 					this, SLOT(import_file(shared_ptr<sigrok::InputFormat>)));
 
 			// run stop button
-			run_stop_button_->setIcon(QIcon(":/icons/Start.png"));
+			run_stop_button_->setIcon(QIcon(":/icons/play.svg"));
 			run_stop_button_->setShortcut(QKeySequence(Qt::Key_S));
-			run_stop_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			run_stop_button_->setText(tr("Start"));
+			run_stop_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			run_stop_button_->setToolTip(tr("Start"));
 			connect(run_stop_button_, SIGNAL(clicked()), this, SIGNAL(run_stop_button_clicked()));
 			// model change button
 			model_change_button_->setMenu(menu_model_view);
-			model_change_button_->setIcon(QIcon(":/icons/Single.png")); // default single model
+			model_change_button_->setIcon(QIcon(":/icons/capture-single.svg"));
 			// model_change_button_->setDefaultAction(actionSingle);
 			model_change_button_->setPopupMode(QToolButton::MenuButtonPopup);
-			model_change_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			model_change_button_->setText(tr("Model"));
+			model_change_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			model_change_button_->setToolTip(tr("Acquisition Mode"));
 			connect(model_change_button_, &QToolButton::clicked, model_change_button_, &QToolButton::showMenu);
 			// open button
 			open_button_->setMenu(import_menu);
 			open_button_->setDefaultAction(action_open_);
 			open_button_->setPopupMode(QToolButton::MenuButtonPopup);
-			open_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			open_button_->setText(tr("Open"));
+			open_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			open_button_->setToolTip(tr("Open"));
 			// Save button
 			vector<QAction *> save_actions;
 			save_actions.push_back(action_save_);
@@ -370,20 +388,19 @@ namespace pv
 			save_button_->setMenu(export_menu);
 			save_button_->setDefaultAction(action_save_);
 			save_button_->setPopupMode(QToolButton::MenuButtonPopup);
-			save_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			save_button_->setText(tr("Save"));
+			save_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			save_button_->setToolTip(tr("Save"));
 			// Device selector menu
 			connect(&device_selector_, SIGNAL(device_selected()),
 					this, SLOT(on_device_selected()));
 
 			// Setup the decoder button
 #ifdef ENABLE_DECODE
-			add_decoder_button_->setIcon(QIcon(":/icons/add-decoder.png"));
+			add_decoder_button_->setIcon(QIcon(":/icons/decoder.svg"));
 			add_decoder_button_->setPopupMode(QToolButton::InstantPopup);
 			add_decoder_button_->setToolTip(tr("Add protocol decoder"));
 			add_decoder_button_->setShortcut(QKeySequence(Qt::Key_D));
-			add_decoder_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			add_decoder_button_->setText(tr("Decoder"));
+			add_decoder_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
 			connect(add_decoder_button_, SIGNAL(clicked()),
 					this, SLOT(on_add_decoder_clicked()));
@@ -422,11 +439,26 @@ namespace pv
 			// 	run_stop_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
 			// 	run_stop_button_->setText(tr("Start"));
 			// connect(run_stop_button_, SIGNAL(clicked()), this, SIGNAL(run_stop_button_clicked()));
-			channels_button_ex_->setIcon(QIcon(":/icons/channels.png"));
-			channels_button_ex_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-			channels_button_ex_->setToolButtonStyle((Qt::ToolButtonStyle)Qt::ToolButtonTextUnderIcon);
-			channels_button_ex_->setText(tr("Option"));
-			connect(channels_button_ex_, SIGNAL(clicked()), this, SLOT(channels_button_ex_clicked()));
+			action_device_options_->setText(tr("Device Options"));
+			action_channel_configuration_->setText(tr("Channel Configuration"));
+			action_channel_configuration_->setIcon(QIcon(":/icons/device-settings.svg"));
+			connect(action_device_options_, &QAction::triggered, this, [this]() {
+				if (channels_) channels_->show_acquisition_tab();
+				channels_button_ex_clicked();
+			});
+			connect(action_channel_configuration_, &QAction::triggered, this, [this]() {
+				if (channels_) channels_->show_channels_tab();
+				channels_button_ex_clicked();
+			});
+			channels_button_ex_->setDefaultAction(action_channel_configuration_);
+			channels_button_ex_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			for (QToolButton *button : {open_button_, save_button_,
+					model_change_button_, run_stop_button_, channels_button_ex_,
+					new_view_button_, help_button_})
+				button->setFixedSize(32, 32);
+#ifdef ENABLE_DECODE
+			add_decoder_button_->setFixedSize(32, 32);
+#endif
 			add_toolbar_widgets();
 
 			sample_count_.installEventFilter(this);
@@ -462,13 +494,6 @@ namespace pv
 				channels_ = nullptr;
 			}
 
-			/* 停止热插拔线程 */
-			if (t_hot_plug.joinable())
-			{
-				hot_plug_listen_ = false;
-				t_hot_plug.join();
-			}
-
 			/* 清理CH375DLL资源 */
 #ifdef _WIN32
 			ch375_cleanup();
@@ -499,10 +524,20 @@ namespace pv
 			DeviceManager &mgr = session_.device_manager();
 			shared_ptr<devices::Device> selected_device = session_.device();
 			list<shared_ptr<devices::Device>> devs;
-			copy(mgr.devices().begin(), mgr.devices().end(), back_inserter(devs));
-			if (std::find(devs.begin(), devs.end(), selected_device) == devs.end())
+			for (const shared_ptr<devices::HardwareDevice> &device : mgr.devices()) {
+				if (util::is_wch_device(QString::fromStdString(
+						device->device()->vendor())))
+					devs.push_back(device);
+			}
+			if (selected_device &&
+				util::is_wch_device(QString::fromStdString(
+					selected_device->device()->vendor())) &&
+				std::find(devs.begin(), devs.end(), selected_device) == devs.end())
 				devs.push_back(selected_device);
 			device_selector_.set_device_list(devs, selected_device);
+			const bool has_device = !!selected_device;
+			action_device_options_->setEnabled(has_device);
+			action_channel_configuration_->setEnabled(has_device);
 			update_device_config_widgets();
 		}
 
@@ -513,23 +548,10 @@ namespace pv
 			device_selector_.setEnabled(ui_enabled);
 			// configure_button_.setEnabled(ui_enabled);
 			// channels_button_.setEnabled(ui_enabled);
-			channels_button_ex_->setEnabled(ui_enabled);
-			// Check if demo device - sample rate/count should stay disabled
-			const shared_ptr<devices::Device> device = device_selector_.selected_device();
-			shared_ptr<devices::HardwareDevice> hw_device =
-				std::dynamic_pointer_cast<devices::HardwareDevice>(device);
-			bool is_demo = false;
-			if (hw_device) {
-				string driver_name = hw_device->hardware_device()->driver()->name();
-				is_demo = (driver_name == "demo");
-			}
-			if (is_demo) {
-				sample_count_.setEnabled(false);
-				sample_rate_.setEnabled(false);
-			} else {
-				sample_count_.setEnabled(ui_enabled);
-				sample_rate_.setEnabled(ui_enabled);
-			}
+			const bool has_device = !!device_selector_.selected_device();
+			channels_button_ex_->setEnabled(ui_enabled && has_device);
+			sample_count_.setEnabled(ui_enabled && has_device);
+			sample_rate_.setEnabled(ui_enabled && has_device);
 			if (model_change_button_)
 				model_change_button_->setEnabled(ui_enabled);
 		}
@@ -548,6 +570,8 @@ namespace pv
 		{
 			return action_open_;
 		}
+
+		QAction *MainBar::action_new_view() const { return action_new_view_; }
 
 		QAction *MainBar::action_save() const
 		{
@@ -568,6 +592,15 @@ namespace pv
 		{
 			return action_connect_;
 		}
+
+		QAction *MainBar::action_single() const { return action_single_; }
+		QAction *MainBar::action_repeat() const { return action_repeat_; }
+		QAction *MainBar::action_device_options() const { return action_device_options_; }
+		QAction *MainBar::action_channel_configuration() const { return action_channel_configuration_; }
+		QAction *MainBar::action_version_info() const { return action_version_info_; }
+		QAction *MainBar::action_update() const { return action_update_; }
+		QAction *MainBar::action_software_update() const { return action_software_update_; }
+		QAction *MainBar::action_user_guide() const { return action_user_guide_; }
 
 		void MainBar::update_sample_rate_selector()
 		{
@@ -790,14 +823,7 @@ namespace pv
 				sampleRate = 25000;
 			}
 			double max_time = 18000000000.00 / ((double)sampleRate * (double)(channel_number_ / 8.00));
-			shared_ptr<devices::HardwareDevice> hw_dev_for_min_time =
-				std::dynamic_pointer_cast<devices::HardwareDevice>(device);
-			bool is_demo_min_time = false;
-			if (hw_dev_for_min_time) {
-				string driver_name = hw_dev_for_min_time->hardware_device()->driver()->name();
-				is_demo_min_time = (driver_name == "demo");
-			}
-			double min_time = is_demo_min_time ? 0.002 : 0.5;
+			double min_time = 0.5;
 			sample_count_.show_125_list(min_time * 10000, max_time * 10000); // commit sample count
 
 			if (sr_dev->config_check(ConfigKey::LIMIT_SAMPLES, Capability::GET))
@@ -1058,9 +1084,12 @@ namespace pv
 		{
 			const shared_ptr<devices::Device> device = device_selector_.selected_device();
 			if (!device) {
-				device_status_icon_->setIcon(QIcon(":/icons/Demo.png"));
-				device_status_icon_->setText(tr("Demo"));
-				device_status_icon_->setToolTip(tr("Device Status: Demo"));
+				device_status_icon_->setIcon(QIcon(":/icons/status-grey.svg"));
+				device_status_icon_->setText(tr("Not connected"));
+				device_status_icon_->setToolTip(tr("Device Status: Not connected"));
+				device_selector_.setIcon(QIcon(":/icons/status-grey.svg"));
+				device_selector_.set_device_list_name(tr("Not connected"));
+				device_selector_.setToolTip(tr("Device Status: Not connected"));
 				return;
 			}
 
@@ -1068,20 +1097,10 @@ namespace pv
 				device_status_icon_->setIcon(QIcon(":/icons/File.png"));
 				device_status_icon_->setText(tr("File"));
 				device_status_icon_->setToolTip(tr("Device Status: File"));
+				device_selector_.setIcon(QIcon(":/icons/status-green.svg"));
+				device_selector_.set_device_list_name(tr("Capture file"));
+				device_selector_.setToolTip(tr("Device Status: File"));
 				return;
-			}
-
-			shared_ptr<devices::HardwareDevice> hw_device =
-				std::dynamic_pointer_cast<devices::HardwareDevice>(device);
-
-			if (hw_device) {
-				string driver_name = hw_device->hardware_device()->driver()->name();
-				if (driver_name == "demo") {
-					device_status_icon_->setIcon(QIcon(":/icons/Demo.png"));
-					device_status_icon_->setText(tr("Demo"));
-					device_status_icon_->setToolTip(tr("Device Status: Demo"));
-					return;
-				}
 			}
 
 			const shared_ptr<sigrok::Device> sr_dev = device->device();
@@ -1105,20 +1124,26 @@ namespace pv
 					device_status_icon_->setIcon(QIcon(":/icons/USB20.png"));
 					device_status_icon_->setText(tr("USB2.0"));
 					device_status_icon_->setToolTip(tr("Device Status: USB 2.0"));
+					device_selector_.set_device_list_name("CH32H417  ·  USB 2.0");
 				} else {
 					device_status_icon_->setIcon(QIcon(":/icons/USB30.png"));
 					device_status_icon_->setText(tr("USB3.0"));
 					device_status_icon_->setToolTip(tr("Device Status: USB 3.0"));
+					device_selector_.set_device_list_name("CH32H417  ·  USB 3.0");
 				}
 			} else if (vendor == "USB3.0(CH569)") {
 				device_status_icon_->setIcon(QIcon(":/icons/USB30.png"));
 				device_status_icon_->setText(tr("USB3.0"));
 				device_status_icon_->setToolTip(tr("Device Status: USB 3.0"));
+				device_selector_.set_device_list_name("CH569  ·  USB 3.0");
 			} else {
-				device_status_icon_->setIcon(QIcon(":/icons/Demo.png"));
-				device_status_icon_->setText(tr("Demo"));
-				device_status_icon_->setToolTip(tr("Device Status: Demo"));
+				device_status_icon_->setIcon(QIcon(":/icons/status-green.svg"));
+				device_status_icon_->setText(tr("Connected"));
+				device_status_icon_->setToolTip(tr("Device Status: Connected"));
+				device_selector_.set_device_list_name(tr("Connected"));
 			}
+			device_selector_.setIcon(QIcon(":/icons/status-green.svg"));
+			device_selector_.setToolTip(tr("Select analyzer"));
 		}
 
 		void MainBar::renew_samplecount_samplerate(uint64_t samplerate, uint64_t samplerate_max)
@@ -1267,7 +1292,11 @@ namespace pv
 			// channels_button_action_->setVisible(!!device);
 			if (!device)
 			{
-				// configure_button_action_->setVisible(false);
+				if (channels_) {
+					delete channels_;
+					channels_ = nullptr;
+				}
+				sample_count_supported_ = false;
 				sample_count_.show_none();
 				sample_rate_.show_none();
 				return;
@@ -1277,30 +1306,8 @@ namespace pv
 			if (!sr_dev)
 				return;
 
-			// Check if this is a demo device
-			shared_ptr<devices::HardwareDevice> hw_device =
-				std::dynamic_pointer_cast<devices::HardwareDevice>(device);
-			bool is_demo_device = false;
-			if (hw_device) {
-				string driver_name = hw_device->hardware_device()->driver()->name();
-				if (driver_name == "demo") {
-					is_demo_device = true;
-				}
-			}
-
-			// Disable sample rate and sample count selectors for demo device
-			if (is_demo_device) {
-				sample_count_.setEnabled(false);
-				sample_rate_.setEnabled(false);
-			} else {
-				sample_count_.setEnabled(true);
-				sample_rate_.setEnabled(true);
-			}
-
-			// Update the configure popup
-			DeviceOptions *const opts = new DeviceOptions(sr_dev, this);
-			// configure_button_action_->setVisible(!opts->binding().properties().empty());
-			// configure_button_.set_popup(opts);
+			sample_count_.setEnabled(true);
+			sample_rate_.setEnabled(true);
 
 			// Update the channels popup
 			if (channels_)
@@ -1346,10 +1353,6 @@ namespace pv
 			if (sr_dev->config_check(ConfigKey::LIMIT_SAMPLES, Capability::SET))
 				sample_count_supported_ = true;
 
-			// Add notification of reconfigure events
-			// Note: No need to disconnect the previous signal as that QObject instance is destroyed
-			connect(&opts->binding(), SIGNAL(config_changed()),
-					this, SLOT(on_config_changed()));
 
 			// Update sweep timing widgets.
 			update_sample_count_selector();
@@ -1791,13 +1794,24 @@ namespace pv
 
 		void MainBar::on_device_selected()
 		{
+			const QString vendor = device_selector_.selected_vendor();
+			MainWindow *main_window = qobject_cast<MainWindow*>(window());
+			if (!util::is_wch_device(vendor) || !main_window ||
+					!main_window->analyzer_present(vendor)) {
+				device_selector_.set_not_connected();
+				update_device_config_widgets();
+				update_device_status_icon();
+				if (main_window)
+					QTimer::singleShot(0, main_window, &MainWindow::refresh_devices_now);
+				return;
+			}
+
 			shared_ptr<devices::Device> device = device_selector_.selected_device();
 			if (!device) {
 				return;
 			}
 
 			const shared_ptr<sigrok::Device> sr_dev = device->device();
-			QString vendor = QString::fromStdString(sr_dev->vendor());
 			QString model = QString::fromStdString(sr_dev->model());
 
 			// 处理 CH569 和 CH32H417 设备的切换
@@ -1838,129 +1852,12 @@ namespace pv
 			session_.select_device(device);
 		}
 
-		void MainBar::hot_plug_listen()
-		{
-			uint16_t vid = WCH_VID;
-			uint16_t pid_ch569 = WCH_PID_CH569;
-			/* CH32H417检测已移至CH375SetDeviceNotify回调 */
-
-			// 跟踪CH569设备的插拔状态
-			bool ch569_attached = false;
-			bool ch569_attached_pre = false;
-
-			libusb_device **devlist;
-			struct libusb_device_descriptor des;
-			libusb_context *libusb_ctx = NULL;
-			int device_count = 0;
-			int index = 0;
-			int index_time = 0;
-
-			while (hot_plug_listen_)
-			{
-				device_count = libusb_get_device_list(libusb_ctx, &devlist);
-				ch569_attached = false;
-
-				for (index = 0; index < device_count; index++)
-				{
-					libusb_get_device_descriptor(devlist[index], &des);
-					if (des.idVendor == vid && des.idProduct == pid_ch569)
-					{
-						ch569_attached = true;
-						break;
-					}
-				}
-				libusb_free_device_list(devlist, 1);
-
-				if (index_time < 3)
-				{
-					index_time++;
-				}
-				else
-				{
-					// 获取当前选中的设备类型
-					QString currentVendorName = get_vendorName();
-					bool is_using_ch569 = (currentVendorName == "USB3.0(CH569)");
-
-					// 检查 CH569 状态变化
-					if (ch569_attached != ch569_attached_pre)
-					{
-						if (ch569_attached)
-						{
-							// CH569 插入，只更新设备列表，不自动切换
-							device_attached();
-						}
-						else if (is_using_ch569)
-						{
-							// 当前使用的 CH569 被拔出
-							set_vendorName("");
-							session_.stop_capture();
-							divice_detached();
-						}
-						index_time = 0;
-					}
-				}
-
-				g_usleep(100000);
-				ch569_attached_pre = ch569_attached;
-			}
-		}
-
 		void MainBar::on_device_changed()
 		{
 			update_device_list();
-			update_device_config_widgets();
 			update_device_status_icon();
-			renew_setting_default();
-		}
-
-		void MainBar::hot_plug_start()
-		{
-			/* 设置静态实例指针 */
-			s_mainbar_instance = this;
-
-			/* 注册unsigned long为Qt元类型，用于跨线程信号传递 */
-			qRegisterMetaType<unsigned long>("unsigned long");
-
-#ifdef _WIN32
-			/* 初始化CH375DLL用于CH32H417热插拔检测 */
-			ch375_init();
-
-			/* 注册CH32H417设备事件通知回调 */
-			ch375_set_device_notify(0, NULL, ch32h417_notify_callback);
-#endif
-
-			/* 启动CH569轮询线程 */
-			if (t_hot_plug.joinable())
-			{
-				hot_plug_listen_ = false;
-				t_hot_plug.join();
-			}
-			hot_plug_listen_ = true;
-			usleep(10000);
-			t_hot_plug = std::thread(&MainBar::hot_plug_listen, this);
-		}
-
-		void MainBar::hot_plug_stop()
-		{
-			/* 清除静态实例指针 */
-			s_mainbar_instance = nullptr;
-
-#ifdef _WIN32
-			/* 取消CH32H417设备事件通知回调 */
-			ch375_set_device_notify(0, NULL, NULL);
-#endif
-
-			/* 停止CH569轮询线程 */
-			if (t_hot_plug.joinable())
-			{
-				hot_plug_listen_ = false;
-				t_hot_plug.join();
-			}
-
-			/* 清理CH375DLL */
-#ifdef _WIN32
-			ch375_cleanup();
-#endif
+			if (device_selector_.selected_device())
+				renew_setting_default();
 		}
 
 		void MainBar::on_capture_state_changed(int state)
@@ -1993,17 +1890,17 @@ namespace pv
 		void MainBar::on_actionSingle_triggered()
 		{
 			capture_mode_ = Session::Single;
-			model_change_button_->setIcon(QIcon(":/icons/Single.png"));
-			// model_change_button_->setText(tr("Single"));
-			model_change_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+			model_change_button_->setIcon(QIcon(":/icons/capture-single.svg"));
+			model_change_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			model_change_button_->setToolTip(tr("Single acquisition"));
 		}
 
 		void MainBar::on_actionRepeat_triggered()
 		{
 			capture_mode_ = Session::Repeat;
-			model_change_button_->setIcon(QIcon(":/icons/Repeat.png"));
-			// model_change_button_->setText(tr("Repeat"));
-			model_change_button_->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+			model_change_button_->setIcon(QIcon(":/icons/repeat.svg"));
+			model_change_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+			model_change_button_->setToolTip(tr("Repeat acquisition"));
 		}
 
 		void MainBar::update_runstop_status(int state)
@@ -2011,13 +1908,13 @@ namespace pv
 			if (state == Session::Stopped)
 			{
 				// set start icon
-				run_stop_button_->setIcon(QIcon(":/icons/Start.png"));
-				run_stop_button_->setText(tr("Start"));
+				run_stop_button_->setIcon(QIcon(":/icons/play.svg"));
+				run_stop_button_->setToolTip(tr("Start"));
 			}
 			else
 			{
-				run_stop_button_->setIcon(QIcon(":/icons/Stop.png"));
-				run_stop_button_->setText(tr("Stop"));
+				run_stop_button_->setIcon(QIcon(":/icons/stop.svg"));
+				run_stop_button_->setToolTip(tr("Stop"));
 			}
 		}
 
@@ -2133,12 +2030,16 @@ namespace pv
 
 		void MainBar::add_toolbar_widgets()
 		{
-			addWidget(device_status_icon_);
+			addWidget(&device_selector_);
+			QWidget *toolbar_spacer = new QWidget(this);
+			toolbar_spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+			toolbar_spacer->setStyleSheet("background: transparent; border: none;");
+			addWidget(toolbar_spacer);
+			addSeparator();
 			addWidget(open_button_);
 			addWidget(save_button_);
 			addSeparator();
 
-			addWidget(&device_selector_);
 			if (channels_button_ex_)
 				addWidget(channels_button_ex_);
 			addWidget(&sample_count_);
@@ -2191,20 +2092,30 @@ namespace pv
 
 		void MainBar::channels_button_ex_clicked()
 		{
+			if (!channels_)
+				return;
+
 			QDialog *dialog = new QDialog(this);
 			dialog->setWindowTitle(tr("Device Options"));
 			dialog->setModal(true);
 
 			dialog->setWindowFlags(dialog->windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
-			dialog->setFixedSize(channels_->sizeHint());
-
 			QVBoxLayout *layout = new QVBoxLayout(dialog);
 			layout->setContentsMargins(0, 0, 0, 0);
 			layout->addWidget(channels_);
-			connect(dialog, &QDialog::finished, this, [this, dialog]()
-					{ channels_->setParent(this); channels_->parent_dialog_ = nullptr; });
+			QPointer<pv::popups::Channels> panel(channels_);
+			connect(dialog, &QDialog::finished, this, [this, panel]() {
+				if (!panel)
+					return;
+				panel->setParent(this);
+				panel->parent_dialog_ = nullptr;
+			});
 			dialog->setLayout(layout);
+			dialog->setMinimumSize(560, 340);
+			dialog->resize(channels_->sizeHint());
+			if (QScreen *screen = dialog->screen())
+				dialog->resize(dialog->size().boundedTo(screen->availableGeometry().size() - QSize(40, 40)));
 
 			channels_->parent_dialog_ = dialog;
 
@@ -2218,13 +2129,13 @@ namespace pv
 
 		void MainBar::on_action_version_info_triggered()
 		{
-			QString softwareVersion = "0.4 based on pulseview 0.5.0-git-7e5c839";
+			QString softwareVersion = QString::fromLatin1(U3LOGIC_VERSION_STRING);
 			QString firmwareVersion;
 			QString fpgaVersion;
 			QString text;
 			QString vendorName = get_vendorName();
 
-			// demo设备或无设备时，只显示软件版本
+			// 无设备时只显示软件版本
 			if (vendorName != "USB3.0(CH32H417)" && vendorName != "USB3.0(CH569)")
 			{
 				text = QString("<b>软件版本：</b> %1").arg(softwareVersion);
@@ -2314,6 +2225,73 @@ namespace pv
 				connect(okBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
 
 				dialog.exec();
+		}
+
+		void MainBar::on_action_software_update_triggered()
+		{
+			const QString normal_text = tr("Software Update");
+			action_software_update_->setEnabled(false);
+			action_software_update_->setText(tr("Checking for Updates..."));
+
+			QNetworkAccessManager *manager = new QNetworkAccessManager(this);
+			QNetworkRequest request(QUrl(QStringLiteral(
+				"https://api.github.com/repos/equence/U3LogicAnalyzer/releases/latest")));
+			request.setRawHeader("Accept", "application/vnd.github+json");
+			request.setRawHeader("User-Agent", QByteArray("U3LogicAnalyzer/") +
+				U3LOGIC_VERSION_STRING);
+
+			QNetworkReply *reply = manager->get(request);
+			QPointer<QNetworkReply> guarded_reply(reply);
+			QTimer::singleShot(10000, reply, [guarded_reply]() {
+				if (guarded_reply && !guarded_reply->isFinished())
+					guarded_reply->abort();
+			});
+
+			connect(reply, &QNetworkReply::finished, this,
+				[this, reply, manager, normal_text]() {
+				action_software_update_->setEnabled(true);
+				action_software_update_->setText(normal_text);
+
+				if (reply->error() != QNetworkReply::NoError) {
+					QMessageBox::warning(this, tr("Software Update"),
+						tr("Unable to check for updates.\n%1")
+						.arg(reply->errorString()));
+					reply->deleteLater();
+					manager->deleteLater();
+					return;
+				}
+
+				softwareupdate::ReleaseInfo release;
+				QString parse_error;
+				if (!softwareupdate::parse_github_release(reply->readAll(),
+						&release, &parse_error)) {
+					QMessageBox::warning(this, tr("Software Update"),
+						tr("GitHub returned an invalid update response.\n%1")
+						.arg(parse_error));
+					reply->deleteLater();
+					manager->deleteLater();
+					return;
+				}
+
+				const QString current = QString::fromLatin1(U3LOGIC_VERSION_STRING);
+				if (softwareupdate::is_newer_version(release.tag_name, current)) {
+					QMessageBox box(QMessageBox::Information, tr("Software Update"),
+						tr("A new version is available.\n\nCurrent: %1\nLatest: %2")
+						.arg(current, release.tag_name), QMessageBox::NoButton, this);
+					QPushButton *open_button = box.addButton(
+						tr("Open Release Page"), QMessageBox::AcceptRole);
+					box.addButton(QMessageBox::Cancel);
+					box.exec();
+					if (box.clickedButton() == open_button)
+						QDesktopServices::openUrl(QUrl(release.html_url));
+				} else {
+					QMessageBox::information(this, tr("Software Update"),
+						tr("U3LogicAnalyzer %1 is up to date.").arg(current));
+				}
+
+				reply->deleteLater();
+				manager->deleteLater();
+			});
 		}
 
 		void MainBar::on_action_feedback_triggered()
